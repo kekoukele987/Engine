@@ -1,0 +1,7 @@
+# 黑名单 MD5 库（每行一条，32位小写十六进制）
+# EICAR 测试病毒文件
+44d88612fea8a8f36de82e1278abb02f
+# 示例恶意文件
+a87ff679a2f3e71d9181a67b7542122c
+1679091c5a880faf6fb5e6087eb1b2dc
+8f14e45fceea167a5a36dedd4bea2543

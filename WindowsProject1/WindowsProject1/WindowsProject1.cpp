@@ -3,6 +3,11 @@
 
 #include "framework.h"
 #include "WindowsProject1.h"
+#include "MD5Engine.h"
+#include <commdlg.h>
+#include <string>
+
+#pragma comment(lib, "Comdlg32.lib")
 
 #define MAX_LOADSTRING 100
 
@@ -128,6 +133,44 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 //  WM_DESTROY  - 发送退出消息并返回
 //
 //
+static std::wstring OpenFileDlg(HWND hWnd)
+{
+    wchar_t path[MAX_PATH] = {};
+    OPENFILENAMEW ofn      = {};
+    ofn.lStructSize        = sizeof ofn;
+    ofn.hwndOwner          = hWnd;
+    ofn.lpstrFile          = path;
+    ofn.nMaxFile           = MAX_PATH;
+    ofn.lpstrFilter        = L"所有文件\0*.*\0可执行文件\0*.exe;*.dll\0";
+    ofn.Flags              = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+    return GetOpenFileNameW(&ofn) ? path : L"";
+}
+
+static void DoScan(HWND hWnd, const wchar_t* title)
+{
+    std::wstring file = OpenFileDlg(hWnd);
+    if (file.empty()) return;
+
+    ScanReport r = ScanFile(file);
+
+    wchar_t md5W[33] = {};
+    MultiByteToWideChar(CP_ACP, 0, r.md5.c_str(), -1, md5W, 33);
+
+    wchar_t msg[1024];
+    if (r.result == ScanResult::Black) {
+        swprintf_s(msg, L"发现威胁！\n\n文件：%s\nMD5 ：%s\n\n状态：黑名单病毒文件", file.c_str(), md5W);
+        MessageBoxW(hWnd, msg, title, MB_OK | MB_ICONERROR);
+    }
+    else if (r.result == ScanResult::White) {
+        swprintf_s(msg, L"文件安全\n\n文件：%s\nMD5 ：%s\n\n状态：白名单安全文件", file.c_str(), md5W);
+        MessageBoxW(hWnd, msg, title, MB_OK | MB_ICONINFORMATION);
+    }
+    else {
+        swprintf_s(msg, L"未知文件\n\n文件：%s\nMD5 ：%s\n\n状态：不在数据库中", file.c_str(), md5W);
+        MessageBoxW(hWnd, msg, title, MB_OK | MB_ICONWARNING);
+    }
+}
+
 static void RepositionButtons(HWND hWnd)
 {
     RECT rc;
@@ -169,10 +212,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             switch (wmId)
             {
             case IDC_BTN_QUICK_SCAN:
-                MessageBoxW(hWnd, L"正在启动快速扫描...", L"快速扫描", MB_OK | MB_ICONINFORMATION);
+                DoScan(hWnd, L"快速扫描");
                 break;
             case IDC_BTN_CUSTOM_SCAN:
-                MessageBoxW(hWnd, L"请选择要扫描的目录或文件。", L"自定义扫描", MB_OK | MB_ICONINFORMATION);
+                DoScan(hWnd, L"自定义扫描");
                 break;
             case IDM_ABOUT:
                 DialogBox(hInst, MAKEINTRESOURCE(IDD_ABOUTBOX), hWnd, About);
