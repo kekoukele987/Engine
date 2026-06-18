@@ -5,7 +5,7 @@
 #include <cwctype>
 
 // ---------------------------------------------------------------------------
-// UTF-8 <-> wstring helpers (SQLite uses UTF-8 internally)
+// UTF-8 <-> wstring helpers (SQLite stores UTF-8)
 // ---------------------------------------------------------------------------
 
 static std::string WtoU8(const std::wstring& w)
@@ -44,7 +44,7 @@ TrustZone::~TrustZone()
 }
 
 // ---------------------------------------------------------------------------
-// Path normalization: absolute + lowercase
+// Path normalization: absolute + lowercase (for File / Folder types)
 // ---------------------------------------------------------------------------
 
 std::wstring TrustZone::Normalize(const std::wstring& path) const
@@ -57,7 +57,7 @@ std::wstring TrustZone::Normalize(const std::wstring& path) const
 }
 
 // ---------------------------------------------------------------------------
-// Load: open / create the SQLite database and read all trusted paths
+// Load: open / create the SQLite database and populate in-memory state
 // ---------------------------------------------------------------------------
 
 void TrustZone::Load(const std::wstring& dataDir)
@@ -65,38 +65,47 @@ void TrustZone::Load(const std::wstring& dataDir)
     if (m_loaded) return;
     m_loaded = true;
 
-    // Ensure the data directory exists
     CreateDirectoryW(dataDir.c_str(), nullptr);
 
-    // Resolve absolute path for the database file
     wchar_t absW[MAX_PATH] = {};
     GetFullPathNameW((dataDir + L"trust.db").c_str(), MAX_PATH, absW, nullptr);
-    std::string dbPath = WtoU8(absW);
 
-    // Open (or create) the database
-    int rc = sqlite3_open_v2(dbPath.c_str(), &m_db,
+    int rc = sqlite3_open_v2(WtoU8(absW).c_str(), &m_db,
                              SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nullptr);
     if (rc != SQLITE_OK) return;
 
-    // Create table if it doesn't exist yet
+    // Schema: type (0=File, 1=Folder, 2=MD5) + value (path or MD5 hex)
     const char* createSQL =
         "CREATE TABLE IF NOT EXISTS trust_files ("
         "  id       INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "  path     TEXT    NOT NULL UNIQUE,"
+        "  type     INTEGER NOT NULL DEFAULT 0,"
+        "  value    TEXT    NOT NULL UNIQUE,"
         "  added_at TEXT    DEFAULT (datetime('now','localtime'))"
         ");";
     sqlite3_exec(m_db, createSQL, nullptr, nullptr, nullptr);
 
-    // Read all stored paths into memory
-    const char* selectSQL = "SELECT path FROM trust_files ORDER BY id;";
+    const char* selectSQL = "SELECT id, type, value FROM trust_files ORDER BY id;";
     sqlite3_stmt* stmt = nullptr;
     if (sqlite3_prepare_v2(m_db, selectSQL, -1, &stmt, nullptr) == SQLITE_OK) {
         while (sqlite3_step(stmt) == SQLITE_ROW) {
-            const char* u8 = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
-            std::wstring path = U8toW(u8);
-            if (!path.empty()) {
-                m_entries.push_back(path);
-                m_normalized.insert(Normalize(path));
+            TrustEntry e;
+            e.id   = sqlite3_column_int(stmt, 0);
+            e.type = static_cast<TrustType>(sqlite3_column_int(stmt, 1));
+            e.value = U8toW(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2)));
+            if (e.value.empty()) continue;
+
+            m_entries.push_back(e);
+
+            switch (e.type) {
+            case TrustType::File:
+                m_trustedPaths.insert(Normalize(e.value));
+                break;
+            case TrustType::Folder:
+                m_trustedFolders.insert(Normalize(e.value));
+                break;
+            case TrustType::MD5:
+                m_trustedMD5s.insert(WtoU8(e.value));
+                break;
             }
         }
         sqlite3_finalize(stmt);
@@ -104,63 +113,111 @@ void TrustZone::Load(const std::wstring& dataDir)
 }
 
 // ---------------------------------------------------------------------------
-// AddFile: insert into DB and update in-memory state
+// AddEntry: insert into DB and update in-memory state
 // ---------------------------------------------------------------------------
 
-bool TrustZone::AddFile(const std::wstring& filePath)
+int TrustZone::AddEntry(const std::wstring& value, TrustType type)
 {
-    std::wstring norm = Normalize(filePath);
-    if (m_normalized.count(norm)) return false;  // already trusted
+    if (value.empty()) return -1;
 
+    // Duplicate check on in-memory state
+    std::string u8val = WtoU8(value);
+    switch (type) {
+    case TrustType::File:
+        if (m_trustedPaths.count(Normalize(value))) return -1;
+        break;
+    case TrustType::Folder:
+        if (m_trustedFolders.count(Normalize(value))) return -1;
+        break;
+    case TrustType::MD5:
+        if (m_trustedMD5s.count(u8val)) return -1;
+        break;
+    }
+
+    int newId = -1;
     if (m_db) {
-        const char* sql = "INSERT OR IGNORE INTO trust_files (path) VALUES (?);";
+        const char* sql = "INSERT OR IGNORE INTO trust_files (type, value) VALUES (?, ?);";
         sqlite3_stmt* stmt = nullptr;
         if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-            std::string u8 = WtoU8(filePath);
-            sqlite3_bind_text(stmt, 1, u8.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int(stmt,  1, static_cast<int>(type));
+            sqlite3_bind_text(stmt, 2, u8val.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_step(stmt);
+            sqlite3_finalize(stmt);
+            if (sqlite3_changes(m_db) > 0)
+                newId = static_cast<int>(sqlite3_last_insert_rowid(m_db));
+        }
+    } else {
+        // No DB (not loaded yet) - assign a temporary negative id
+        newId = -(static_cast<int>(m_entries.size()) + 1);
+    }
+
+    if (newId == -1) return -1;
+
+    m_entries.push_back({ newId, type, value });
+
+    switch (type) {
+    case TrustType::File:   m_trustedPaths.insert(Normalize(value));   break;
+    case TrustType::Folder: m_trustedFolders.insert(Normalize(value)); break;
+    case TrustType::MD5:    m_trustedMD5s.insert(u8val);               break;
+    }
+
+    return newId;
+}
+
+// ---------------------------------------------------------------------------
+// RemoveEntry: delete from DB and update in-memory state
+// ---------------------------------------------------------------------------
+
+bool TrustZone::RemoveEntry(int id)
+{
+    auto it = std::find_if(m_entries.begin(), m_entries.end(),
+                           [id](const TrustEntry& e) { return e.id == id; });
+    if (it == m_entries.end()) return false;
+
+    TrustEntry e = *it;
+
+    if (m_db) {
+        const char* sql = "DELETE FROM trust_files WHERE id = ?;";
+        sqlite3_stmt* stmt = nullptr;
+        if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+            sqlite3_bind_int(stmt, 1, id);
             sqlite3_step(stmt);
             sqlite3_finalize(stmt);
         }
     }
 
-    m_entries.push_back(filePath);
-    m_normalized.insert(norm);
+    switch (e.type) {
+    case TrustType::File:   m_trustedPaths.erase(Normalize(e.value));   break;
+    case TrustType::Folder: m_trustedFolders.erase(Normalize(e.value)); break;
+    case TrustType::MD5:    m_trustedMD5s.erase(WtoU8(e.value));        break;
+    }
+    m_entries.erase(it);
     return true;
 }
 
 // ---------------------------------------------------------------------------
-// RemoveFile: delete from DB and update in-memory state
+// IsTrusted: check all three trust types in priority order
 // ---------------------------------------------------------------------------
 
-bool TrustZone::RemoveFile(const std::wstring& filePath)
+bool TrustZone::IsTrusted(const std::wstring& filePath, const std::string& md5) const
 {
-    std::wstring norm = Normalize(filePath);
-    if (!m_normalized.count(norm)) return false;
+    // MD5 trust: path-independent, cheapest lookup
+    if (!md5.empty() && m_trustedMD5s.count(md5)) return true;
 
-    if (m_db) {
-        const char* sql = "DELETE FROM trust_files WHERE path = ?;";
-        sqlite3_stmt* stmt = nullptr;
-        if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-            std::string u8 = WtoU8(filePath);
-            sqlite3_bind_text(stmt, 1, u8.c_str(), -1, SQLITE_TRANSIENT);
-            sqlite3_step(stmt);
-            sqlite3_finalize(stmt);
+    std::wstring norm = Normalize(filePath);
+
+    // Exact file path match
+    if (m_trustedPaths.count(norm)) return true;
+
+    // Folder trust: file path starts with a trusted folder path
+    for (const auto& folder : m_trustedFolders) {
+        if (norm.size() > folder.size() &&
+            norm.compare(0, folder.size(), folder) == 0 &&
+            norm[folder.size()] == L'\\')
+        {
+            return true;
         }
     }
 
-    m_normalized.erase(norm);
-    m_entries.erase(
-        std::remove_if(m_entries.begin(), m_entries.end(),
-            [&](const std::wstring& e) { return Normalize(e) == norm; }),
-        m_entries.end());
-    return true;
-}
-
-// ---------------------------------------------------------------------------
-// IsTrusted: O(log n) lookup in normalized set
-// ---------------------------------------------------------------------------
-
-bool TrustZone::IsTrusted(const std::wstring& filePath) const
-{
-    return m_normalized.count(Normalize(filePath)) > 0;
+    return false;
 }

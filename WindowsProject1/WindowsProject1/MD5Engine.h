@@ -22,3 +22,4 @@ using ProgressFn = std::function<void(const std::wstring& currentFile, int total
 
 ScanReport     ScanFile(const std::wstring& filePath);
 QuickScanStats QuickScan(ProgressFn onProgress);
+std::string    CalcFileMD5(const std::wstring& filePath);

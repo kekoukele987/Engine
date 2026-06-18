@@ -5,9 +5,12 @@
 #include "MD5Engine.h"
 #include "TrustZone.h"
 #include <commdlg.h>
+#include <shlobj.h>
 #include <string>
 
 #pragma comment(lib, "Comdlg32.lib")
+#pragma comment(lib, "shell32.lib")
+#pragma comment(lib, "ole32.lib")
 
 #define MAX_LOADSTRING  100
 #define WM_SCAN_DONE   (WM_APP + 1)
@@ -106,6 +109,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     UNREFERENCED_PARAMETER(hPrevInstance);
     UNREFERENCED_PARAMETER(lpCmdLine);
 
+    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+
     LoadStringW(hInstance, IDS_APP_TITLE,        szTitle,       MAX_LOADSTRING);
     LoadStringW(hInstance, IDC_WINDOWSPROJECT1,  szWindowClass, MAX_LOADSTRING);
     MyRegisterClass(hInstance);
@@ -120,6 +125,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
             DispatchMessage(&msg);
         }
     }
+    CoUninitialize();
     return (int)msg.wParam;
 }
 
@@ -189,6 +195,41 @@ static std::wstring OpenFileDlg(HWND hWnd)
     return GetOpenFileNameW(&ofn) ? path : L"";
 }
 
+static std::wstring OpenFolderDlg(HWND hWnd)
+{
+    wchar_t path[MAX_PATH] = {};
+    BROWSEINFOW bi     = {};
+    bi.hwndOwner       = hWnd;
+    bi.lpszTitle       = L"选择要信任的文件夹";
+    bi.ulFlags         = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
+    LPITEMIDLIST pidl  = SHBrowseForFolderW(&bi);
+    if (!pidl) return {};
+    SHGetPathFromIDListW(pidl, path);
+    CoTaskMemFree(pidl);
+    return path;
+}
+
+// ---------------------------------------------------------------------------
+// Trust zone dialog helpers
+// ---------------------------------------------------------------------------
+
+static const wchar_t* TrustTypeLabel(TrustType t)
+{
+    switch (t) {
+    case TrustType::File:   return L"[文件]   ";
+    case TrustType::Folder: return L"[文件夹] ";
+    case TrustType::MD5:    return L"[MD5]    ";
+    default:                return L"";
+    }
+}
+
+static void TrustListAddEntry(HWND hList, const TrustEntry& e)
+{
+    std::wstring label = TrustTypeLabel(e.type) + e.value;
+    int idx = (int)SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)label.c_str());
+    SendMessageW(hList, LB_SETITEMDATA, idx, (LPARAM)e.id);
+}
+
 // ---------------------------------------------------------------------------
 // Trust zone dialog
 // ---------------------------------------------------------------------------
@@ -202,56 +243,97 @@ LRESULT CALLBACK TrustZoneDlgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM
     case WM_CREATE:
     {
         RECT rc; GetClientRect(hWnd, &rc);
-        int w = rc.right  - rc.left;
+        int w = rc.right - rc.left;
         int h = rc.bottom - rc.top;
 
+        // Listbox leaves 90px at bottom for two button rows
         hList = CreateWindowW(L"LISTBOX", nullptr,
             WS_CHILD | WS_VISIBLE | WS_BORDER | WS_VSCROLL |
             LBS_NOTIFY | LBS_NOINTEGRALHEIGHT,
-            10, 10, w - 20, h - 60,
+            10, 10, w - 20, h - 95,
             hWnd, (HMENU)IDC_TRUST_LIST, hInst, nullptr);
 
-        for (auto& e : TrustZone::Instance().GetEntries())
-            SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)e.c_str());
+        // Row 1: three "add" buttons split evenly
+        int bw = (w - 20 - 16) / 3;
+        CreateWindowW(L"BUTTON", L"添加文件",   WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,
+            10,           h-80, bw, 30, hWnd, (HMENU)IDC_BTN_ADD_TRUST,        hInst, nullptr);
+        CreateWindowW(L"BUTTON", L"添加文件夹", WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,
+            10+bw+8,      h-80, bw, 30, hWnd, (HMENU)IDC_BTN_ADD_TRUST_FOLDER, hInst, nullptr);
+        CreateWindowW(L"BUTTON", L"按MD5添加",  WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,
+            10+bw*2+16,   h-80, bw, 30, hWnd, (HMENU)IDC_BTN_ADD_TRUST_MD5,   hInst, nullptr);
 
-        CreateWindowW(L"BUTTON", L"添加文件", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-            10, h - 44, 120, 32, hWnd, (HMENU)IDC_BTN_ADD_TRUST, hInst, nullptr);
-        CreateWindowW(L"BUTTON", L"移除选中", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-            140, h - 44, 120, 32, hWnd, (HMENU)IDC_BTN_REMOVE_TRUST, hInst, nullptr);
-        CreateWindowW(L"BUTTON", L"关闭", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-            w - 110, h - 44, 100, 32, hWnd, (HMENU)IDCANCEL, hInst, nullptr);
+        // Row 2: remove + close
+        CreateWindowW(L"BUTTON", L"移除选中", WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,
+            10,      h-42, 150, 30, hWnd, (HMENU)IDC_BTN_REMOVE_TRUST, hInst, nullptr);
+        CreateWindowW(L"BUTTON", L"关闭",     WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,
+            w - 110, h-42, 100, 30, hWnd, (HMENU)IDCANCEL,             hInst, nullptr);
+
+        // Populate list with type labels; store entry id as item data
+        for (auto& e : TrustZone::Instance().GetEntries())
+            TrustListAddEntry(hList, e);
         break;
     }
 
     case WM_COMMAND:
     {
         int id = LOWORD(wParam);
+
         if (id == IDC_BTN_ADD_TRUST) {
             std::wstring file = OpenFileDlg(hWnd);
             if (!file.empty()) {
-                if (TrustZone::Instance().AddFile(file))
-                    SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)file.c_str());
+                int newId = TrustZone::Instance().AddEntry(file, TrustType::File);
+                if (newId < 0)
+                    MessageBoxW(hWnd, L"该文件已在信任区中。", L"提示", MB_OK|MB_ICONINFORMATION);
                 else
-                    MessageBoxW(hWnd, L"该文件已在信任区中。", L"提示", MB_OK | MB_ICONINFORMATION);
+                    TrustListAddEntry(hList, { newId, TrustType::File, file });
             }
+
+        } else if (id == IDC_BTN_ADD_TRUST_FOLDER) {
+            std::wstring folder = OpenFolderDlg(hWnd);
+            if (!folder.empty()) {
+                int newId = TrustZone::Instance().AddEntry(folder, TrustType::Folder);
+                if (newId < 0)
+                    MessageBoxW(hWnd, L"该文件夹已在信任区中。", L"提示", MB_OK|MB_ICONINFORMATION);
+                else
+                    TrustListAddEntry(hList, { newId, TrustType::Folder, folder });
+            }
+
+        } else if (id == IDC_BTN_ADD_TRUST_MD5) {
+            // Let user pick a file; we compute its MD5 and trust that hash
+            std::wstring file = OpenFileDlg(hWnd);
+            if (!file.empty()) {
+                std::string md5 = CalcFileMD5(file);
+                if (md5.empty()) {
+                    MessageBoxW(hWnd, L"无法计算该文件的MD5，请检查文件是否可读。",
+                                L"错误", MB_OK|MB_ICONERROR);
+                    break;
+                }
+                std::wstring wmd5(md5.begin(), md5.end());
+                int newId = TrustZone::Instance().AddEntry(wmd5, TrustType::MD5);
+                if (newId < 0)
+                    MessageBoxW(hWnd, L"该MD5已在信任区中。", L"提示", MB_OK|MB_ICONINFORMATION);
+                else
+                    TrustListAddEntry(hList, { newId, TrustType::MD5, wmd5 });
+            }
+
         } else if (id == IDC_BTN_REMOVE_TRUST) {
             int sel = (int)SendMessageW(hList, LB_GETCURSEL, 0, 0);
             if (sel == LB_ERR) {
-                MessageBoxW(hWnd, L"请先选择要移除的文件。", L"提示", MB_OK | MB_ICONINFORMATION);
+                MessageBoxW(hWnd, L"请先选择要移除的条目。", L"提示", MB_OK|MB_ICONINFORMATION);
                 break;
             }
-            wchar_t path[MAX_PATH] = {};
-            SendMessageW(hList, LB_GETTEXT, sel, (LPARAM)path);
-            TrustZone::Instance().RemoveFile(path);
+            int entryId = (int)SendMessageW(hList, LB_GETITEMDATA, sel, 0);
+            TrustZone::Instance().RemoveEntry(entryId);
             SendMessageW(hList, LB_DELETESTRING, sel, 0);
+
         } else if (id == IDCANCEL) {
             DestroyWindow(hWnd);
         }
         break;
     }
 
-    case WM_CLOSE:    DestroyWindow(hWnd); break;
-    case WM_DESTROY:  g_hTrustDlg = nullptr; hList = nullptr; break;
+    case WM_CLOSE:   DestroyWindow(hWnd); break;
+    case WM_DESTROY: g_hTrustDlg = nullptr; hList = nullptr; break;
     default: return DefWindowProc(hWnd, message, wParam, lParam);
     }
     return 0;
@@ -494,7 +576,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             TrustZone::Instance().Load(ComputeDataDir());
             g_hTrustDlg = CreateWindowW(kTrustDlgClass, L"信任区管理",
                 WS_OVERLAPPEDWINDOW & ~WS_MAXIMIZEBOX & ~WS_THICKFRAME,
-                CW_USEDEFAULT, CW_USEDEFAULT, 640, 440,
+                CW_USEDEFAULT, CW_USEDEFAULT, 640, 480,
                 hWnd, nullptr, hInst, nullptr);
             if (g_hTrustDlg) {
                 ShowWindow(g_hTrustDlg, SW_SHOW);

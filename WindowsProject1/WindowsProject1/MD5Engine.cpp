@@ -103,6 +103,7 @@ ScanReport ScanFile(const std::wstring& filePath)
     std::wstring dir = DataDir();
     TrustZone::Instance().Load(dir);
 
+    // Stage 1: path / folder trust (no MD5 calc needed)
     if (TrustZone::Instance().IsTrusted(filePath)) {
         r.result = ScanResult::White;
         return r;
@@ -111,12 +112,23 @@ ScanReport ScanFile(const std::wstring& filePath)
     r.md5 = CalcMD5(filePath);
     if (r.md5.empty()) return r;
 
+    // Stage 2: MD5 trust overrides blacklist
+    if (TrustZone::Instance().IsTrusted(filePath, r.md5)) {
+        r.result = ScanResult::White;
+        return r;
+    }
+
     auto black = LoadList(dir + L"black.dat");
     auto white  = LoadList(dir + L"white.dat");
 
     if (black.count(r.md5))      r.result = ScanResult::Black;
     else if (white.count(r.md5)) r.result = ScanResult::White;
     return r;
+}
+
+std::string CalcFileMD5(const std::wstring& filePath)
+{
+    return CalcMD5(filePath);
 }
 
 // ---------------------------------------------------------------------------
@@ -207,6 +219,7 @@ static void ScanDirectory(
         int total = stats.black + stats.white + stats.unknown + stats.errors;
         if (onProgress) onProgress(filePath, total + 1);
 
+        // Stage 1: path / folder trust (skip MD5 calc)
         if (TrustZone::Instance().IsTrusted(filePath)) {
             ++stats.white;
             continue;
@@ -215,6 +228,9 @@ static void ScanDirectory(
         std::string md5 = CalcMD5(filePath);
         if (md5.empty()) {
             ++stats.errors;
+        } else if (TrustZone::Instance().IsTrusted(filePath, md5)) {
+            // Stage 2: MD5 trust overrides blacklist
+            ++stats.white;
         } else if (black.count(md5)) {
             ++stats.black;
             stats.blackFiles.push_back(filePath);
