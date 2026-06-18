@@ -15,6 +15,10 @@
 #define IDC_MYICON				2
 #define IDC_BTN_QUICK_SCAN		1001
 #define IDC_BTN_CUSTOM_SCAN		1002
+#define IDC_BTN_TRUST_ZONE		1003
+#define IDC_TRUST_LIST			1010
+#define IDC_BTN_ADD_TRUST		1011
+#define IDC_BTN_REMOVE_TRUST	1012
 #ifndef IDC_STATIC
 #define IDC_STATIC				-1
 #endif

@@ -1,8 +1,9 @@
-﻿// WindowsProject1.cpp
+// WindowsProject1.cpp
 
 #include "framework.h"
 #include "WindowsProject1.h"
 #include "MD5Engine.h"
+#include "TrustZone.h"
 #include <commdlg.h>
 #include <string>
 
@@ -10,6 +11,8 @@
 
 #define MAX_LOADSTRING  100
 #define WM_SCAN_DONE   (WM_APP + 1)
+
+static const wchar_t* kTrustDlgClass = L"TrustZoneDlgClass";
 
 // ---------------------------------------------------------------------------
 // Globals
@@ -21,13 +24,15 @@ WCHAR     szWindowClass[MAX_LOADSTRING];
 
 HWND hBtnQuickScan  = nullptr;
 HWND hBtnCustomScan = nullptr;
+HWND hBtnTrustZone  = nullptr;
 
 #define BTN_W   160
 #define BTN_H    60
 #define BTN_GAP  20
 
-static HANDLE        g_hScanThread = nullptr;
+static HANDLE         g_hScanThread = nullptr;
 static QuickScanStats g_scanStats;
+static HWND           g_hTrustDlg  = nullptr;
 
 // ---------------------------------------------------------------------------
 // Forward declarations
@@ -36,7 +41,10 @@ static QuickScanStats g_scanStats;
 ATOM             MyRegisterClass(HINSTANCE hInstance);
 BOOL             InitInstance(HINSTANCE, int);
 LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
+LRESULT CALLBACK TrustZoneDlgProc(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK About(HWND, UINT, WPARAM, LPARAM);
+
+static std::wstring OpenFileDlg(HWND hWnd);
 
 // ---------------------------------------------------------------------------
 // wWinMain
@@ -73,18 +81,32 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
 ATOM MyRegisterClass(HINSTANCE hInstance)
 {
-    WNDCLASSEXW wcex    = {};
-    wcex.cbSize         = sizeof(WNDCLASSEX);
-    wcex.style          = CS_HREDRAW | CS_VREDRAW;
-    wcex.lpfnWndProc    = WndProc;
-    wcex.hInstance      = hInstance;
-    wcex.hIcon          = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_WINDOWSPROJECT1));
-    wcex.hCursor        = LoadCursor(nullptr, IDC_ARROW);
-    wcex.hbrBackground  = (HBRUSH)(COLOR_WINDOW + 1);
-    wcex.lpszMenuName   = MAKEINTRESOURCEW(IDC_WINDOWSPROJECT1);
-    wcex.lpszClassName  = szWindowClass;
-    wcex.hIconSm        = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_SMALL));
-    return RegisterClassExW(&wcex);
+    // Main window
+    WNDCLASSEXW wcex   = {};
+    wcex.cbSize        = sizeof(WNDCLASSEX);
+    wcex.style         = CS_HREDRAW | CS_VREDRAW;
+    wcex.lpfnWndProc   = WndProc;
+    wcex.hInstance     = hInstance;
+    wcex.hIcon         = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_WINDOWSPROJECT1));
+    wcex.hCursor       = LoadCursor(nullptr, IDC_ARROW);
+    wcex.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    wcex.lpszMenuName  = MAKEINTRESOURCEW(IDC_WINDOWSPROJECT1);
+    wcex.lpszClassName = szWindowClass;
+    wcex.hIconSm       = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_SMALL));
+    ATOM a = RegisterClassExW(&wcex);
+
+    // Trust zone dialog window class
+    WNDCLASSEXW td   = {};
+    td.cbSize        = sizeof(WNDCLASSEX);
+    td.style         = CS_HREDRAW | CS_VREDRAW;
+    td.lpfnWndProc   = TrustZoneDlgProc;
+    td.hInstance     = hInstance;
+    td.hCursor       = LoadCursor(nullptr, IDC_ARROW);
+    td.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
+    td.lpszClassName = kTrustDlgClass;
+    RegisterClassExW(&td);
+
+    return a;
 }
 
 // ---------------------------------------------------------------------------
@@ -100,6 +122,113 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
     ShowWindow(hWnd, nCmdShow);
     UpdateWindow(hWnd);
     return TRUE;
+}
+
+// ---------------------------------------------------------------------------
+// File open dialog helper
+// ---------------------------------------------------------------------------
+
+static std::wstring OpenFileDlg(HWND hWnd)
+{
+    wchar_t path[MAX_PATH] = {};
+    OPENFILENAMEW ofn = {};
+    ofn.lStructSize   = sizeof ofn;
+    ofn.hwndOwner     = hWnd;
+    ofn.lpstrFile     = path;
+    ofn.nMaxFile      = MAX_PATH;
+    ofn.lpstrFilter   = L"所有文件\0*.*\0可执行文件\0*.exe;*.dll\0";
+    ofn.Flags         = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+    return GetOpenFileNameW(&ofn) ? path : L"";
+}
+
+// ---------------------------------------------------------------------------
+// Trust zone dialog procedure
+// ---------------------------------------------------------------------------
+
+LRESULT CALLBACK TrustZoneDlgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    static HWND hList = nullptr;
+
+    switch (message)
+    {
+    case WM_CREATE:
+    {
+        RECT rc; GetClientRect(hWnd, &rc);
+        int w = rc.right - rc.left;
+        int h = rc.bottom - rc.top;
+
+        hList = CreateWindowW(L"LISTBOX", nullptr,
+            WS_CHILD | WS_VISIBLE | WS_BORDER | WS_VSCROLL |
+            LBS_NOTIFY | LBS_NOINTEGRALHEIGHT,
+            10, 10, w - 20, h - 60,
+            hWnd, (HMENU)IDC_TRUST_LIST, hInst, nullptr);
+
+        // Populate from TrustZone
+        for (auto& e : TrustZone::Instance().GetEntries())
+            SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)e.c_str());
+
+        CreateWindowW(L"BUTTON", L"添加文件",
+            WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+            10, h - 44, 120, 32,
+            hWnd, (HMENU)IDC_BTN_ADD_TRUST, hInst, nullptr);
+
+        CreateWindowW(L"BUTTON", L"移除选中",
+            WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+            140, h - 44, 120, 32,
+            hWnd, (HMENU)IDC_BTN_REMOVE_TRUST, hInst, nullptr);
+
+        CreateWindowW(L"BUTTON", L"关闭",
+            WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+            w - 110, h - 44, 100, 32,
+            hWnd, (HMENU)IDCANCEL, hInst, nullptr);
+        break;
+    }
+
+    case WM_COMMAND:
+    {
+        int id = LOWORD(wParam);
+
+        if (id == IDC_BTN_ADD_TRUST) {
+            std::wstring file = OpenFileDlg(hWnd);
+            if (!file.empty()) {
+                if (TrustZone::Instance().AddFile(file))
+                    SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)file.c_str());
+                else
+                    MessageBoxW(hWnd, L"该文件已在信任区中。", L"提示", MB_OK | MB_ICONINFORMATION);
+            }
+        }
+        else if (id == IDC_BTN_REMOVE_TRUST) {
+            int sel = (int)SendMessageW(hList, LB_GETCURSEL, 0, 0);
+            if (sel == LB_ERR) {
+                MessageBoxW(hWnd, L"请先选择要移除的文件。", L"提示", MB_OK | MB_ICONINFORMATION);
+                break;
+            }
+            wchar_t path[MAX_PATH] = {};
+            SendMessageW(hList, LB_GETTEXT, sel, (LPARAM)path);
+            TrustZone::Instance().RemoveFile(path);
+            SendMessageW(hList, LB_DELETESTRING, sel, 0);
+        }
+        else if (id == IDCANCEL) {
+            DestroyWindow(hWnd);
+        }
+        break;
+    }
+
+    case WM_CLOSE:
+        DestroyWindow(hWnd);
+        break;
+
+    case WM_DESTROY:
+        g_hTrustDlg = nullptr;
+        EnableWindow(GetParent(hWnd), TRUE);
+        SetForegroundWindow(GetParent(hWnd));
+        hList = nullptr;
+        break;
+
+    default:
+        return DefWindowProc(hWnd, message, wParam, lParam);
+    }
+    return 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -125,19 +254,6 @@ static DWORD WINAPI ScanThread(LPVOID param)
 // Custom scan: single-file dialog
 // ---------------------------------------------------------------------------
 
-static std::wstring OpenFileDlg(HWND hWnd)
-{
-    wchar_t path[MAX_PATH] = {};
-    OPENFILENAMEW ofn = {};
-    ofn.lStructSize   = sizeof ofn;
-    ofn.hwndOwner     = hWnd;
-    ofn.lpstrFile     = path;
-    ofn.nMaxFile      = MAX_PATH;
-    ofn.lpstrFilter   = L"所有文件\0*.*\0可执行文件\0*.exe;*.dll\0";
-    ofn.Flags         = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
-    return GetOpenFileNameW(&ofn) ? path : L"";
-}
-
 static void DoCustomScan(HWND hWnd)
 {
     std::wstring file = OpenFileDlg(hWnd);
@@ -153,7 +269,7 @@ static void DoCustomScan(HWND hWnd)
         swprintf_s(msg, L"发现威胁！\n\n文件：%s\nMD5 ：%s\n\n状态：黑名单病毒文件", file.c_str(), md5W);
         MessageBoxW(hWnd, msg, L"自定义扫描", MB_OK | MB_ICONERROR);
     } else if (r.result == ScanResult::White) {
-        swprintf_s(msg, L"文件安全\n\n文件：%s\nMD5 ：%s\n\n状态：白名单安全文件", file.c_str(), md5W);
+        swprintf_s(msg, L"文件安全\n\n文件：%s\nMD5 ：%s\n\n状态：安全文件", file.c_str(), md5W);
         MessageBoxW(hWnd, msg, L"自定义扫描", MB_OK | MB_ICONINFORMATION);
     } else {
         swprintf_s(msg, L"未知文件\n\n文件：%s\nMD5 ：%s\n\n状态：不在数据库中", file.c_str(), md5W);
@@ -162,7 +278,7 @@ static void DoCustomScan(HWND hWnd)
 }
 
 // ---------------------------------------------------------------------------
-// Button layout
+// Button layout (3 buttons centered)
 // ---------------------------------------------------------------------------
 
 static void RepositionButtons(HWND hWnd)
@@ -171,10 +287,12 @@ static void RepositionButtons(HWND hWnd)
     GetClientRect(hWnd, &rc);
     int cx     = (rc.right - rc.left) / 2;
     int cy     = (rc.bottom - rc.top) / 2;
-    int startX = cx - (BTN_W * 2 + BTN_GAP) / 2;
+    int totalW = BTN_W * 3 + BTN_GAP * 2;
+    int startX = cx - totalW / 2;
     int startY = cy - BTN_H / 2;
-    SetWindowPos(hBtnQuickScan,  nullptr, startX,                    startY, BTN_W, BTN_H, SWP_NOZORDER);
-    SetWindowPos(hBtnCustomScan, nullptr, startX + BTN_W + BTN_GAP,  startY, BTN_W, BTN_H, SWP_NOZORDER);
+    SetWindowPos(hBtnQuickScan,  nullptr, startX,                         startY, BTN_W, BTN_H, SWP_NOZORDER);
+    SetWindowPos(hBtnCustomScan, nullptr, startX + (BTN_W + BTN_GAP),     startY, BTN_W, BTN_H, SWP_NOZORDER);
+    SetWindowPos(hBtnTrustZone,  nullptr, startX + (BTN_W + BTN_GAP) * 2, startY, BTN_W, BTN_H, SWP_NOZORDER);
 }
 
 // ---------------------------------------------------------------------------
@@ -193,6 +311,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         hBtnCustomScan = CreateWindowW(L"BUTTON", L"自定义扫描",
             WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
             0, 0, BTN_W, BTN_H, hWnd, (HMENU)IDC_BTN_CUSTOM_SCAN, hInst, nullptr);
+
+        hBtnTrustZone = CreateWindowW(L"BUTTON", L"信任区管理",
+            WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+            0, 0, BTN_W, BTN_H, hWnd, (HMENU)IDC_BTN_TRUST_ZONE, hInst, nullptr);
         break;
 
     case WM_SIZE:
@@ -201,18 +323,13 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
     case WM_SCAN_DONE:
     {
-        // Restore title
         SetWindowTextW(hWnd, szTitle);
-
-        // Re-enable buttons
         EnableWindow(hBtnQuickScan,  TRUE);
         EnableWindow(hBtnCustomScan, TRUE);
-
-        // Close thread handle
+        EnableWindow(hBtnTrustZone,  TRUE);
         if (g_hScanThread) { CloseHandle(g_hScanThread); g_hScanThread = nullptr; }
 
-        // Build result message
-        auto& r = g_scanStats;
+        auto& r   = g_scanStats;
         int   total = r.black + r.white + r.unknown + r.errors;
 
         wchar_t msg[2048];
@@ -227,10 +344,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
         if (!r.blackFiles.empty()) {
             wcscat_s(msg, L"\n\n威胁文件列表：\n");
-            for (auto& f : r.blackFiles) {
+            for (auto& f : r.blackFiles)
                 if (wcslen(msg) + f.size() + 2 < 2000)
                     wcscat_s(msg, (f + L"\n").c_str());
-            }
         }
 
         UINT icon = r.black > 0 ? MB_ICONERROR : MB_ICONINFORMATION;
@@ -244,14 +360,25 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         switch (wmId)
         {
         case IDC_BTN_QUICK_SCAN:
-            if (g_hScanThread) break;   // already running
+            if (g_hScanThread) break;
             EnableWindow(hBtnQuickScan,  FALSE);
             EnableWindow(hBtnCustomScan, FALSE);
+            EnableWindow(hBtnTrustZone,  FALSE);
             g_hScanThread = CreateThread(nullptr, 0, ScanThread, hWnd, 0, nullptr);
             break;
 
         case IDC_BTN_CUSTOM_SCAN:
             DoCustomScan(hWnd);
+            break;
+
+        case IDC_BTN_TRUST_ZONE:
+            if (g_hTrustDlg) { SetForegroundWindow(g_hTrustDlg); break; }
+            EnableWindow(hWnd, FALSE);
+            g_hTrustDlg = CreateWindowW(kTrustDlgClass, L"信任区管理",
+                WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
+                CW_USEDEFAULT, CW_USEDEFAULT, 640, 440,
+                hWnd, nullptr, hInst, nullptr);
+            ShowWindow(g_hTrustDlg, SW_SHOW);
             break;
 
         case IDM_ABOUT:
@@ -271,7 +398,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     case WM_PAINT:
     {
         PAINTSTRUCT ps;
-        HDC hdc = BeginPaint(hWnd, &ps);
+        BeginPaint(hWnd, &ps);
         EndPaint(hWnd, &ps);
         break;
     }
