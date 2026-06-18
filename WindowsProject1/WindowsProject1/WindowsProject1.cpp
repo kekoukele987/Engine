@@ -15,7 +15,38 @@
 #define MAX_LOADSTRING  100
 #define WM_SCAN_DONE   (WM_APP + 1)
 
-static const wchar_t* kTrustDlgClass = L"TrustZoneDlgClass";
+static const wchar_t* kTrustDlgClass    = L"TrustZoneDlgClass";
+static const wchar_t* kSettingsDlgClass = L"SettingsDlgClass";
+
+// ---------------------------------------------------------------------------
+// Language system
+// ---------------------------------------------------------------------------
+
+enum class AppLang { Chinese = 0, English = 1 };
+static AppLang g_lang = AppLang::Chinese;
+
+struct LangStrings {
+    const wchar_t* winTitle;
+    const wchar_t* subtitle;
+    const wchar_t* quickScan;
+    const wchar_t* customScan;
+    const wchar_t* trustZone;
+    const wchar_t* settings;
+};
+
+static const LangStrings kLang[] = {
+    {
+        L"Engine  杀毒引擎",
+        L"MD5 特征码引擎  |  实时防护已就绪",
+        L"快速扫描", L"自定义扫描", L"信任区管理", L"设置中心"
+    },
+    {
+        L"Engine  Antivirus",
+        L"MD5 Signature Engine  |  Real-time Protection Ready",
+        L"Quick Scan", L"Custom Scan", L"Trust Zone", L"Settings"
+    },
+};
+static const LangStrings& Str() { return kLang[(int)g_lang]; }
 
 // ---------------------------------------------------------------------------
 // Color palette
@@ -33,6 +64,8 @@ static const wchar_t* kTrustDlgClass = L"TrustZoneDlgClass";
 #define CLR_BTN_CS_P    RGB( 29,  78, 216)
 #define CLR_BTN_TZ      RGB(245, 158,  11)   // trust zone  - amber
 #define CLR_BTN_TZ_P    RGB(180,  83,   9)
+#define CLR_BTN_ST      RGB(139,  92, 246)   // settings    - purple
+#define CLR_BTN_ST_P    RGB(109,  40, 217)
 #define CLR_BTN_DIS     RGB( 51,  65,  85)   // disabled - dark slate
 
 // ---------------------------------------------------------------------------
@@ -46,14 +79,16 @@ WCHAR     szWindowClass[MAX_LOADSTRING];
 HWND hBtnQuickScan  = nullptr;
 HWND hBtnCustomScan = nullptr;
 HWND hBtnTrustZone  = nullptr;
+HWND hBtnSettings   = nullptr;
 
 #define BTN_W   160
 #define BTN_H    56
 #define BTN_GAP  24
 
-static HANDLE         g_hScanThread = nullptr;
+static HANDLE         g_hScanThread   = nullptr;
 static QuickScanStats g_scanStats;
-static HWND           g_hTrustDlg  = nullptr;
+static HWND           g_hTrustDlg    = nullptr;
+static HWND           g_hSettingsDlg = nullptr;
 
 static HBRUSH g_hBrushBg = nullptr;
 static HFONT  g_hFontTitle = nullptr;
@@ -94,8 +129,10 @@ ATOM             MyRegisterClass(HINSTANCE hInstance);
 BOOL             InitInstance(HINSTANCE, int);
 LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
 LRESULT CALLBACK TrustZoneDlgProc(HWND, UINT, WPARAM, LPARAM);
+LRESULT CALLBACK SettingsDlgProc(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK About(HWND, UINT, WPARAM, LPARAM);
 static std::wstring OpenFileDlg(HWND hWnd);
+static void ApplyLanguage(HWND hMainWnd);
 
 // ---------------------------------------------------------------------------
 // wWinMain
@@ -159,6 +196,16 @@ ATOM MyRegisterClass(HINSTANCE hInstance)
     td.hbrBackground = g_hBrushBg;
     td.lpszClassName = kTrustDlgClass;
     RegisterClassExW(&td);
+
+    WNDCLASSEXW sd   = {};
+    sd.cbSize        = sizeof(WNDCLASSEX);
+    sd.style         = CS_HREDRAW | CS_VREDRAW;
+    sd.lpfnWndProc   = SettingsDlgProc;
+    sd.hInstance     = hInstance;
+    sd.hCursor       = LoadCursor(nullptr, IDC_ARROW);
+    sd.hbrBackground = g_hBrushBg;
+    sd.lpszClassName = kSettingsDlgClass;
+    RegisterClassExW(&sd);
 
     return a;
 }
@@ -442,6 +489,168 @@ LRESULT CALLBACK TrustZoneDlgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM
 }
 
 // ---------------------------------------------------------------------------
+// Language apply
+// ---------------------------------------------------------------------------
+
+static void ApplyLanguage(HWND hMainWnd)
+{
+    SetWindowTextW(hMainWnd,      Str().winTitle);
+    SetWindowTextW(hBtnQuickScan, Str().quickScan);
+    SetWindowTextW(hBtnCustomScan,Str().customScan);
+    SetWindowTextW(hBtnTrustZone, Str().trustZone);
+    if (hBtnSettings) SetWindowTextW(hBtnSettings, Str().settings);
+    InvalidateRect(hMainWnd, nullptr, TRUE);
+    // Settings dialog: repaint header title + option buttons
+    if (g_hSettingsDlg) {
+        SetWindowTextW(g_hSettingsDlg,
+            g_lang == AppLang::Chinese ? L"设置中心" : L"Settings");
+        RedrawWindow(g_hSettingsDlg, nullptr, nullptr,
+                     RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_ERASE);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Settings dialog
+// ---------------------------------------------------------------------------
+
+LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    static HFONT  hFontTitle  = nullptr;
+    static HBRUSH hBrushLabel = nullptr;
+
+    switch (message)
+    {
+    case WM_CREATE:
+    {
+        hFontTitle  = MakeFont(13, true,  L"Microsoft YaHei");
+        hBrushLabel = CreateSolidBrush(CLR_BG);
+
+        RECT rc; GetClientRect(hWnd, &rc);
+        int w = rc.right - rc.left;
+
+        // Section label
+        HWND hLabel = CreateWindowW(L"STATIC",
+            g_lang == AppLang::Chinese ? L"界面语言" : L"Language",
+            WS_CHILD | WS_VISIBLE,
+            20, TRUST_HEADER_H + 18, w - 40, 20,
+            hWnd, (HMENU)IDC_STATIC, hInst, nullptr);
+        if (g_hFontBtn) SendMessageW(hLabel, WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
+
+        // Language option buttons
+        int optY = TRUST_HEADER_H + 46;
+        int optW = w - 40;
+        HWND hZH = CreateWindowW(L"BUTTON", L"  中文 (Chinese)",
+            WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+            20, optY,      optW, 46, hWnd, (HMENU)IDC_SETTINGS_LANG_ZH, hInst, nullptr);
+        HWND hEN = CreateWindowW(L"BUTTON", L"  English",
+            WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+            20, optY + 54, optW, 46, hWnd, (HMENU)IDC_SETTINGS_LANG_EN, hInst, nullptr);
+        if (g_hFontBtn) {
+            SendMessageW(hZH, WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
+            SendMessageW(hEN, WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
+        }
+        break;
+    }
+
+    case WM_ERASEBKGND:
+    {
+        HDC hdc = (HDC)wParam;
+        RECT rc; GetClientRect(hWnd, &rc);
+        FillRect(hdc, &rc, g_hBrushBg);
+        RECT rcH = { rc.left, rc.top, rc.right, rc.top + TRUST_HEADER_H };
+        HBRUSH hbH = CreateSolidBrush(CLR_HEADER);
+        FillRect(hdc, &rcH, hbH); DeleteObject(hbH);
+        RECT rcL = { rc.left, rc.top + TRUST_HEADER_H, rc.right, rc.top + TRUST_HEADER_H + 3 };
+        HBRUSH hbL = CreateSolidBrush(CLR_ACCENT);
+        FillRect(hdc, &rcL, hbL); DeleteObject(hbL);
+        return 1;
+    }
+
+    case WM_PAINT:
+    {
+        PAINTSTRUCT ps;
+        HDC hdc = BeginPaint(hWnd, &ps);
+        SetBkMode(hdc, TRANSPARENT);
+        SetTextColor(hdc, CLR_TXT_MAIN);
+        if (hFontTitle) SelectObject(hdc, hFontTitle);
+        RECT rcT = { 0, 0, 420, TRUST_HEADER_H };
+        DrawTextW(hdc,
+            g_lang == AppLang::Chinese ? L"设置中心" : L"Settings",
+            -1, &rcT, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        EndPaint(hWnd, &ps);
+        break;
+    }
+
+    case WM_CTLCOLORSTATIC:
+    {
+        HDC hdc = (HDC)wParam;
+        SetTextColor(hdc, CLR_TXT_SUB);
+        SetBkMode(hdc, TRANSPARENT);
+        return (LRESULT)hBrushLabel;
+    }
+
+    case WM_DRAWITEM:
+    {
+        auto* dis = reinterpret_cast<LPDRAWITEMSTRUCT>(lParam);
+        if (dis->CtlType != ODT_BUTTON) break;
+
+        bool selected =
+            (dis->CtlID == IDC_SETTINGS_LANG_ZH && g_lang == AppLang::Chinese) ||
+            (dis->CtlID == IDC_SETTINGS_LANG_EN && g_lang == AppLang::English);
+        bool pressed = (dis->itemState & ODS_SELECTED) != 0;
+
+        HDC dc  = dis->hDC;
+        RECT rc = dis->rcItem;
+
+        // Fill: accent if selected, dark list bg if not
+        COLORREF fillColor  = selected ? CLR_ACCENT : CLR_LIST_BG;
+        COLORREF penColor   = CLR_ACCENT;
+        HBRUSH hbr = CreateSolidBrush(fillColor);
+        HPEN   hpn = CreatePen(PS_SOLID, selected ? 0 : 1, penColor);
+        auto ob = SelectObject(dc, hbr);
+        auto op = SelectObject(dc, hpn);
+        RoundRect(dc, rc.left, rc.top, rc.right, rc.bottom, 8, 8);
+        SelectObject(dc, ob); SelectObject(dc, op);
+        DeleteObject(hbr); DeleteObject(hpn);
+
+        if (pressed) OffsetRect(&rc, 0, 1);
+        SetBkMode(dc, TRANSPARENT);
+        SetTextColor(dc, selected ? RGB(255,255,255) : CLR_ACCENT);
+        if (g_hFontBtn) SelectObject(dc, g_hFontBtn);
+        wchar_t text[64] = {};
+        GetWindowTextW(dis->hwndItem, text, 64);
+        DrawTextW(dc, text, -1, &rc, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        break;
+    }
+
+    case WM_COMMAND:
+    {
+        int id = LOWORD(wParam);
+        AppLang newLang = g_lang;
+        if      (id == IDC_SETTINGS_LANG_ZH) newLang = AppLang::Chinese;
+        else if (id == IDC_SETTINGS_LANG_EN)  newLang = AppLang::English;
+
+        if (newLang != g_lang) {
+            g_lang = newLang;
+            ApplyLanguage(GetParent(hWnd));
+        }
+        break;
+    }
+
+    case WM_CLOSE:   DestroyWindow(hWnd); break;
+    case WM_DESTROY:
+        if (hFontTitle)  { DeleteObject(hFontTitle);  hFontTitle  = nullptr; }
+        if (hBrushLabel) { DeleteObject(hBrushLabel); hBrushLabel = nullptr; }
+        g_hSettingsDlg = nullptr;
+        break;
+
+    default:
+        return DefWindowProc(hWnd, message, wParam, lParam);
+    }
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
 // Quick scan background thread
 // ---------------------------------------------------------------------------
 
@@ -494,12 +703,13 @@ static void RepositionButtons(HWND hWnd)
     GetClientRect(hWnd, &rc);
     int cx     = (rc.right - rc.left) / 2;
     int h      = rc.bottom - rc.top;
-    int totalW = BTN_W * 3 + BTN_GAP * 2;
+    int totalW = BTN_W * 4 + BTN_GAP * 3;
     int startX = cx - totalW / 2;
-    int startY = h * 62 / 100 - BTN_H / 2;   // slightly below center, under title area
+    int startY = h * 62 / 100 - BTN_H / 2;
     SetWindowPos(hBtnQuickScan,  nullptr, startX,                         startY, BTN_W, BTN_H, SWP_NOZORDER);
     SetWindowPos(hBtnCustomScan, nullptr, startX + (BTN_W + BTN_GAP),     startY, BTN_W, BTN_H, SWP_NOZORDER);
     SetWindowPos(hBtnTrustZone,  nullptr, startX + (BTN_W + BTN_GAP) * 2, startY, BTN_W, BTN_H, SWP_NOZORDER);
+    SetWindowPos(hBtnSettings,   nullptr, startX + (BTN_W + BTN_GAP) * 3, startY, BTN_W, BTN_H, SWP_NOZORDER);
 }
 
 // ---------------------------------------------------------------------------
@@ -528,10 +738,15 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
             0, 0, BTN_W, BTN_H, hWnd, (HMENU)IDC_BTN_TRUST_ZONE, hInst, nullptr);
 
+        hBtnSettings = CreateWindowW(L"BUTTON", L"设置中心",
+            WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+            0, 0, BTN_W, BTN_H, hWnd, (HMENU)IDC_BTN_SETTINGS, hInst, nullptr);
+
         if (g_hFontBtn) {
             SendMessageW(hBtnQuickScan,  WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
             SendMessageW(hBtnCustomScan, WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
             SendMessageW(hBtnTrustZone,  WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
+            SendMessageW(hBtnSettings,   WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
         }
         break;
     }
@@ -571,13 +786,13 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         if (g_hFontTitle) SelectObject(hdc, g_hFontTitle);
         SetTextColor(hdc, CLR_TXT_MAIN);
         RECT rcTitle = { 0, 60, rc.right, 110 };
-        DrawTextW(hdc, L"Engine  杀毒引擎", -1, &rcTitle, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        DrawTextW(hdc, Str().winTitle, -1, &rcTitle, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 
         // Subtitle
         if (g_hFontSub) SelectObject(hdc, g_hFontSub);
         SetTextColor(hdc, CLR_TXT_SUB);
         RECT rcSub = { 0, 118, rc.right, 145 };
-        DrawTextW(hdc, L"MD5 特征码引擎  |  实时防护已就绪", -1, &rcSub, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        DrawTextW(hdc, Str().subtitle, -1, &rcSub, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 
         EndPaint(hWnd, &ps);
         break;
@@ -595,7 +810,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         switch (dis->CtlID) {
         case IDC_BTN_QUICK_SCAN:  clrN = CLR_BTN_QS; clrP = CLR_BTN_QS_P; break;
         case IDC_BTN_CUSTOM_SCAN: clrN = CLR_BTN_CS; clrP = CLR_BTN_CS_P; break;
-        default:                  clrN = CLR_BTN_TZ; clrP = CLR_BTN_TZ_P; break;
+        case IDC_BTN_TRUST_ZONE:  clrN = CLR_BTN_TZ; clrP = CLR_BTN_TZ_P; break;
+        case IDC_BTN_SETTINGS:    clrN = CLR_BTN_ST; clrP = CLR_BTN_ST_P; break;
+        default:                  clrN = CLR_BTN_DIS; clrP = CLR_BTN_DIS;  break;
         }
         COLORREF fill = disabled ? CLR_BTN_DIS : (pressed ? clrP : clrN);
 
@@ -686,6 +903,19 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             }
             break;
 
+        case IDC_BTN_SETTINGS:
+            if (g_hSettingsDlg) { SetForegroundWindow(g_hSettingsDlg); break; }
+            g_hSettingsDlg = CreateWindowW(kSettingsDlgClass,
+                g_lang == AppLang::Chinese ? L"设置中心" : L"Settings",
+                WS_OVERLAPPEDWINDOW & ~WS_MAXIMIZEBOX & ~WS_THICKFRAME,
+                CW_USEDEFAULT, CW_USEDEFAULT, 420, 300,
+                hWnd, nullptr, hInst, nullptr);
+            if (g_hSettingsDlg) {
+                ShowWindow(g_hSettingsDlg, SW_SHOW);
+                SetForegroundWindow(g_hSettingsDlg);
+            }
+            break;
+
         case IDM_ABOUT:
             DialogBox(hInst, MAKEINTRESOURCE(IDD_ABOUTBOX), hWnd, About);
             break;
@@ -705,6 +935,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         if (g_hFontSub)   { DeleteObject(g_hFontSub);   g_hFontSub   = nullptr; }
         if (g_hFontBtn)   { DeleteObject(g_hFontBtn);   g_hFontBtn   = nullptr; }
         if (g_hBrushBg)   { DeleteObject(g_hBrushBg);   g_hBrushBg   = nullptr; }
+        hBtnSettings = nullptr;
         PostQuitMessage(0);
         break;
 
