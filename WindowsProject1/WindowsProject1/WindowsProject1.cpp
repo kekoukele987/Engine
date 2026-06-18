@@ -4,6 +4,7 @@
 #include "WindowsProject1.h"
 #include "MD5Engine.h"
 #include "TrustZone.h"
+#include "Settings.h"
 #include <commdlg.h>
 #include <shlobj.h>
 #include <string>
@@ -21,9 +22,6 @@ static const wchar_t* kSettingsDlgClass = L"SettingsDlgClass";
 // ---------------------------------------------------------------------------
 // Language system
 // ---------------------------------------------------------------------------
-
-enum class AppLang { Chinese = 0, English = 1 };
-static AppLang g_lang = AppLang::Chinese;
 
 struct LangStrings {
     const wchar_t* winTitle;
@@ -46,7 +44,7 @@ static const LangStrings kLang[] = {
         L"Quick Scan", L"Custom Scan", L"Trust Zone", L"Settings"
     },
 };
-static const LangStrings& Str() { return kLang[(int)g_lang]; }
+static const LangStrings& Str() { return kLang[(int)Settings::Instance().GetLang()]; }
 
 // ---------------------------------------------------------------------------
 // Color palette
@@ -89,7 +87,6 @@ static HANDLE         g_hScanThread   = nullptr;
 static QuickScanStats g_scanStats;
 static HWND           g_hTrustDlg    = nullptr;
 static HWND           g_hSettingsDlg = nullptr;
-static int            g_scanThreadCount = 4;
 
 static HBRUSH g_hBrushBg = nullptr;
 static HFONT  g_hFontTitle = nullptr;
@@ -148,6 +145,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     UNREFERENCED_PARAMETER(lpCmdLine);
 
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+    Settings::Instance().Load(ComputeDataDir());
 
     LoadStringW(hInstance, IDS_APP_TITLE,        szTitle,       MAX_LOADSTRING);
     LoadStringW(hInstance, IDC_WINDOWSPROJECT1,  szWindowClass, MAX_LOADSTRING);
@@ -504,7 +502,7 @@ static void ApplyLanguage(HWND hMainWnd)
     // Settings dialog: repaint header title + option buttons
     if (g_hSettingsDlg) {
         SetWindowTextW(g_hSettingsDlg,
-            g_lang == AppLang::Chinese ? L"设置中心" : L"Settings");
+            Settings::Instance().GetLang() == AppLang::Chinese ? L"设置中心" : L"Settings");
         RedrawWindow(g_hSettingsDlg, nullptr, nullptr,
                      RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_ERASE);
     }
@@ -582,8 +580,9 @@ LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
         SetTextColor(hdc, CLR_TXT_MAIN);
         if (hFontTitle) SelectObject(hdc, hFontTitle);
         RECT rcT = { 0, 0, 420, TRUST_HEADER_H };
+        auto& cfg = Settings::Instance();
         DrawTextW(hdc,
-            g_lang == AppLang::Chinese ? L"设置中心" : L"Settings",
+            cfg.GetLang() == AppLang::Chinese ? L"设置中心" : L"Settings",
             -1, &rcT, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 
         // Section labels (muted, auto-update with language)
@@ -592,12 +591,12 @@ LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
 
         RECT rcL1 = { 20, kSLangLabelY, 400, kSLangLabelY + 20 };
         DrawTextW(hdc,
-            g_lang == AppLang::Chinese ? L"界面语言" : L"Language",
+            cfg.GetLang() == AppLang::Chinese ? L"界面语言" : L"Language",
             -1, &rcL1, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
         RECT rcL2 = { 20, kSThdLabelY, 400, kSThdLabelY + 20 };
         DrawTextW(hdc,
-            g_lang == AppLang::Chinese ? L"扫描线程数" : L"Scan Threads",
+            cfg.GetLang() == AppLang::Chinese ? L"扫描线程数" : L"Scan Threads",
             -1, &rcL2, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
         EndPaint(hWnd, &ps);
@@ -609,14 +608,15 @@ LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
         auto* dis = reinterpret_cast<LPDRAWITEMSTRUCT>(lParam);
         if (dis->CtlType != ODT_BUTTON) break;
 
+        auto& cfg = Settings::Instance();
         bool selected = false;
         switch (dis->CtlID) {
-        case IDC_SETTINGS_LANG_ZH:   selected = (g_lang == AppLang::Chinese);  break;
-        case IDC_SETTINGS_LANG_EN:   selected = (g_lang == AppLang::English);   break;
-        case IDC_SETTINGS_THREADS_1: selected = (g_scanThreadCount == 1); break;
-        case IDC_SETTINGS_THREADS_2: selected = (g_scanThreadCount == 2); break;
-        case IDC_SETTINGS_THREADS_4: selected = (g_scanThreadCount == 4); break;
-        case IDC_SETTINGS_THREADS_8: selected = (g_scanThreadCount == 8); break;
+        case IDC_SETTINGS_LANG_ZH:   selected = (cfg.GetLang()         == AppLang::Chinese); break;
+        case IDC_SETTINGS_LANG_EN:   selected = (cfg.GetLang()         == AppLang::English); break;
+        case IDC_SETTINGS_THREADS_1: selected = (cfg.GetScanThreads()  == 1); break;
+        case IDC_SETTINGS_THREADS_2: selected = (cfg.GetScanThreads()  == 2); break;
+        case IDC_SETTINGS_THREADS_4: selected = (cfg.GetScanThreads()  == 4); break;
+        case IDC_SETTINGS_THREADS_8: selected = (cfg.GetScanThreads()  == 8); break;
         }
         bool pressed = (dis->itemState & ODS_SELECTED) != 0;
 
@@ -645,24 +645,26 @@ LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
     {
         int id = LOWORD(wParam);
 
+        auto& cfg = Settings::Instance();
+
         // Language
-        AppLang newLang = g_lang;
+        AppLang newLang = cfg.GetLang();
         if      (id == IDC_SETTINGS_LANG_ZH) newLang = AppLang::Chinese;
         else if (id == IDC_SETTINGS_LANG_EN)  newLang = AppLang::English;
-        if (newLang != g_lang) {
-            g_lang = newLang;
+        if (newLang != cfg.GetLang()) {
+            cfg.SetLang(newLang);
             ApplyLanguage(GetWindow(hWnd, GW_OWNER));
             break;
         }
 
         // Thread count
-        int newT = g_scanThreadCount;
+        int newT = cfg.GetScanThreads();
         if      (id == IDC_SETTINGS_THREADS_1) newT = 1;
         else if (id == IDC_SETTINGS_THREADS_2) newT = 2;
         else if (id == IDC_SETTINGS_THREADS_4) newT = 4;
         else if (id == IDC_SETTINGS_THREADS_8) newT = 8;
-        if (newT != g_scanThreadCount) {
-            g_scanThreadCount = newT;
+        if (newT != cfg.GetScanThreads()) {
+            cfg.SetScanThreads(newT);
             // Redraw all thread buttons to reflect new selection
             const int kIds[] = { IDC_SETTINGS_THREADS_1, IDC_SETTINGS_THREADS_2,
                                   IDC_SETTINGS_THREADS_4, IDC_SETTINGS_THREADS_8 };
@@ -696,7 +698,7 @@ static DWORD WINAPI ScanThread(LPVOID param)
         swprintf_s(title, L"扫描中... 已扫描 %d 个文件 | %s",
             total, file.substr(file.find_last_of(L"\\/") + 1).c_str());
         SetWindowTextW(hWnd, title);
-    }, g_scanThreadCount);
+    }, Settings::Instance().GetScanThreads());
     PostMessageW(hWnd, WM_SCAN_DONE, 0, 0);
     return 0;
 }
@@ -940,7 +942,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         case IDC_BTN_SETTINGS:
             if (g_hSettingsDlg) { SetForegroundWindow(g_hSettingsDlg); break; }
             g_hSettingsDlg = CreateWindowW(kSettingsDlgClass,
-                g_lang == AppLang::Chinese ? L"设置中心" : L"Settings",
+                Settings::Instance().GetLang() == AppLang::Chinese ? L"设置中心" : L"Settings",
                 WS_OVERLAPPEDWINDOW & ~WS_MAXIMIZEBOX & ~WS_THICKFRAME,
                 CW_USEDEFAULT, CW_USEDEFAULT, 420, 360,
                 hWnd, nullptr, hInst, nullptr);
