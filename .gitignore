@@ -1,0 +1,46 @@
+# Visual Studio 本地配置
+.vs/
+
+# 用户专属配置
+*.user
+*.suo
+
+# 编译输出目录
+x64/
+x86/
+Debug/
+Release/
+
+# 编译中间产物
+*.obj
+*.ilk
+*.pdb
+*.pch
+*.ipch
+*.aps
+*.res
+*.idb
+
+# 链接产物
+*.exe
+*.dll
+*.lib
+*.exp
+
+# 构建日志
+*.log
+*.tlog
+*.recipe
+*.lastbuildstate
+*_MD.tlog
+
+# IntelliSense / Browse 数据库
+*.db
+*.db-shm
+*.db-wal
+*.opendb
+*.vsidx
+*.ncb
+*.sdf
+*.opensdf
+ipch/

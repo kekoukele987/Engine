@@ -11,6 +11,13 @@ HINSTANCE hInst;                                // 当前实例
 WCHAR szTitle[MAX_LOADSTRING];                  // 标题栏文本
 WCHAR szWindowClass[MAX_LOADSTRING];            // 主窗口类名
 
+HWND hBtnQuickScan  = nullptr;
+HWND hBtnCustomScan = nullptr;
+
+#define BTN_W 160
+#define BTN_H  60
+#define BTN_GAP 20
+
 // 此代码模块中包含的函数的前向声明:
 ATOM                MyRegisterClass(HINSTANCE hInstance);
 BOOL                InitInstance(HINSTANCE, int);
@@ -121,16 +128,52 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 //  WM_DESTROY  - 发送退出消息并返回
 //
 //
+static void RepositionButtons(HWND hWnd)
+{
+    RECT rc;
+    GetClientRect(hWnd, &rc);
+    int cx = (rc.right  - rc.left) / 2;
+    int cy = (rc.bottom - rc.top)  / 2;
+    int totalW = BTN_W * 2 + BTN_GAP;
+    int startX = cx - totalW / 2;
+    int startY = cy - BTN_H / 2;
+    SetWindowPos(hBtnQuickScan,  nullptr, startX,             startY, BTN_W, BTN_H, SWP_NOZORDER);
+    SetWindowPos(hBtnCustomScan, nullptr, startX + BTN_W + BTN_GAP, startY, BTN_W, BTN_H, SWP_NOZORDER);
+}
+
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     switch (message)
     {
+    case WM_CREATE:
+        hBtnQuickScan = CreateWindowW(
+            L"BUTTON", L"快速扫描",
+            WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+            0, 0, BTN_W, BTN_H,
+            hWnd, (HMENU)IDC_BTN_QUICK_SCAN, hInst, nullptr);
+
+        hBtnCustomScan = CreateWindowW(
+            L"BUTTON", L"自定义扫描",
+            WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+            0, 0, BTN_W, BTN_H,
+            hWnd, (HMENU)IDC_BTN_CUSTOM_SCAN, hInst, nullptr);
+        break;
+
+    case WM_SIZE:
+        RepositionButtons(hWnd);
+        break;
+
     case WM_COMMAND:
         {
             int wmId = LOWORD(wParam);
-            // 分析菜单选择:
             switch (wmId)
             {
+            case IDC_BTN_QUICK_SCAN:
+                MessageBoxW(hWnd, L"正在启动快速扫描...", L"快速扫描", MB_OK | MB_ICONINFORMATION);
+                break;
+            case IDC_BTN_CUSTOM_SCAN:
+                MessageBoxW(hWnd, L"请选择要扫描的目录或文件。", L"自定义扫描", MB_OK | MB_ICONINFORMATION);
+                break;
             case IDM_ABOUT:
                 DialogBox(hInst, MAKEINTRESOURCE(IDD_ABOUTBOX), hWnd, About);
                 break;
@@ -146,7 +189,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         {
             PAINTSTRUCT ps;
             HDC hdc = BeginPaint(hWnd, &ps);
-            // TODO: 在此处添加使用 hdc 的任何绘图代码...
             EndPaint(hWnd, &ps);
         }
         break;
