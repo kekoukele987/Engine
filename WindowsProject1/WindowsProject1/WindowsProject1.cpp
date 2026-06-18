@@ -156,7 +156,7 @@ ATOM MyRegisterClass(HINSTANCE hInstance)
     td.lpfnWndProc   = TrustZoneDlgProc;
     td.hInstance     = hInstance;
     td.hCursor       = LoadCursor(nullptr, IDC_ARROW);
-    td.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
+    td.hbrBackground = g_hBrushBg;
     td.lpszClassName = kTrustDlgClass;
     RegisterClassExW(&td);
 
@@ -216,9 +216,9 @@ static std::wstring OpenFolderDlg(HWND hWnd)
 static const wchar_t* TrustTypeLabel(TrustType t)
 {
     switch (t) {
-    case TrustType::File:   return L"[文件]   ";
-    case TrustType::Folder: return L"[文件夹] ";
-    case TrustType::MD5:    return L"[MD5]    ";
+    case TrustType::File:   return L"[文件]     ";
+    case TrustType::Folder: return L"[文件夹]  ";
+    case TrustType::MD5:    return L"[MD5]     ";
     default:                return L"";
     }
 }
@@ -234,43 +234,136 @@ static void TrustListAddEntry(HWND hList, const TrustEntry& e)
 // Trust zone dialog
 // ---------------------------------------------------------------------------
 
+#define CLR_BTN_RED     RGB(239,  68,  68)
+#define CLR_BTN_RED_P   RGB(185,  28,  28)
+#define CLR_LIST_BG     RGB( 22,  33,  62)
+#define CLR_LIST_TXT    RGB(226, 232, 240)
+#define TRUST_HEADER_H  52
+
 LRESULT CALLBACK TrustZoneDlgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
-    static HWND hList = nullptr;
+    static HWND   hList       = nullptr;
+    static HBRUSH hBrushList  = nullptr;
+    static HFONT  hFontTitle  = nullptr;
 
     switch (message)
     {
     case WM_CREATE:
     {
+        hBrushList = CreateSolidBrush(CLR_LIST_BG);
+        hFontTitle = MakeFont(13, true, L"Microsoft YaHei");
+
         RECT rc; GetClientRect(hWnd, &rc);
         int w = rc.right - rc.left;
         int h = rc.bottom - rc.top;
 
-        // Listbox leaves 90px at bottom for two button rows
+        // Listbox: below header, above two button rows
         hList = CreateWindowW(L"LISTBOX", nullptr,
-            WS_CHILD | WS_VISIBLE | WS_BORDER | WS_VSCROLL |
-            LBS_NOTIFY | LBS_NOINTEGRALHEIGHT,
-            10, 10, w - 20, h - 95,
+            WS_CHILD | WS_VISIBLE | WS_VSCROLL | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT,
+            10, TRUST_HEADER_H + 8, w - 20, h - TRUST_HEADER_H - 8 - 95,
             hWnd, (HMENU)IDC_TRUST_LIST, hInst, nullptr);
+        if (g_hFontBtn) SendMessageW(hList, WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
 
-        // Row 1: three "add" buttons split evenly
+        // Row 1: three add buttons (evenly spaced)
         int bw = (w - 20 - 16) / 3;
-        CreateWindowW(L"BUTTON", L"添加文件",   WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,
-            10,           h-80, bw, 30, hWnd, (HMENU)IDC_BTN_ADD_TRUST,        hInst, nullptr);
-        CreateWindowW(L"BUTTON", L"添加文件夹", WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,
-            10+bw+8,      h-80, bw, 30, hWnd, (HMENU)IDC_BTN_ADD_TRUST_FOLDER, hInst, nullptr);
-        CreateWindowW(L"BUTTON", L"按MD5添加",  WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,
-            10+bw*2+16,   h-80, bw, 30, hWnd, (HMENU)IDC_BTN_ADD_TRUST_MD5,   hInst, nullptr);
+        auto mkBtn = [&](const wchar_t* txt, int x, int y, int id) {
+            HWND h2 = CreateWindowW(L"BUTTON", txt, WS_CHILD|WS_VISIBLE|BS_OWNERDRAW,
+                x, y, bw, 32, hWnd, (HMENU)(UINT_PTR)id, hInst, nullptr);
+            if (g_hFontBtn) SendMessageW(h2, WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
+        };
+        mkBtn(L"添加文件",   10,          h-82, IDC_BTN_ADD_TRUST);
+        mkBtn(L"添加文件夹", 10+bw+8,     h-82, IDC_BTN_ADD_TRUST_FOLDER);
+        mkBtn(L"按MD5添加",  10+bw*2+16,  h-82, IDC_BTN_ADD_TRUST_MD5);
 
-        // Row 2: remove + close
-        CreateWindowW(L"BUTTON", L"移除选中", WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,
-            10,      h-42, 150, 30, hWnd, (HMENU)IDC_BTN_REMOVE_TRUST, hInst, nullptr);
-        CreateWindowW(L"BUTTON", L"关闭",     WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,
-            w - 110, h-42, 100, 30, hWnd, (HMENU)IDCANCEL,             hInst, nullptr);
+        // Row 2: remove (left) + close (right), different widths
+        auto mkBtn2 = [&](const wchar_t* txt, int x, int bw2, int id) {
+            HWND h2 = CreateWindowW(L"BUTTON", txt, WS_CHILD|WS_VISIBLE|BS_OWNERDRAW,
+                x, h-42, bw2, 32, hWnd, (HMENU)(UINT_PTR)id, hInst, nullptr);
+            if (g_hFontBtn) SendMessageW(h2, WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
+        };
+        mkBtn2(L"移除选中", 10,      160, IDC_BTN_REMOVE_TRUST);
+        mkBtn2(L"关闭",     w - 116, 106, IDCANCEL);
 
-        // Populate list with type labels; store entry id as item data
         for (auto& e : TrustZone::Instance().GetEntries())
             TrustListAddEntry(hList, e);
+        break;
+    }
+
+    case WM_ERASEBKGND:
+    {
+        HDC hdc = (HDC)wParam;
+        RECT rc; GetClientRect(hWnd, &rc);
+        // Main background
+        FillRect(hdc, &rc, g_hBrushBg);
+        // Header strip
+        RECT rcH = { rc.left, rc.top, rc.right, rc.top + TRUST_HEADER_H };
+        HBRUSH hbH = CreateSolidBrush(CLR_HEADER);
+        FillRect(hdc, &rcH, hbH);
+        DeleteObject(hbH);
+        // Accent line
+        RECT rcL = { rc.left, rc.top + TRUST_HEADER_H, rc.right, rc.top + TRUST_HEADER_H + 3 };
+        HBRUSH hbL = CreateSolidBrush(CLR_ACCENT);
+        FillRect(hdc, &rcL, hbL);
+        DeleteObject(hbL);
+        return 1;
+    }
+
+    case WM_PAINT:
+    {
+        PAINTSTRUCT ps;
+        HDC hdc = BeginPaint(hWnd, &ps);
+        SetBkMode(hdc, TRANSPARENT);
+        SetTextColor(hdc, CLR_TXT_MAIN);
+        if (hFontTitle) SelectObject(hdc, hFontTitle);
+        RECT rcT = { 0, 0, 640, TRUST_HEADER_H };
+        DrawTextW(hdc, L"信任区管理", -1, &rcT, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        EndPaint(hWnd, &ps);
+        break;
+    }
+
+    case WM_CTLCOLORLISTBOX:
+    {
+        HDC hdc = (HDC)wParam;
+        SetTextColor(hdc, CLR_LIST_TXT);
+        SetBkColor(hdc, CLR_LIST_BG);
+        return (LRESULT)hBrushList;
+    }
+
+    case WM_DRAWITEM:
+    {
+        auto* dis = reinterpret_cast<LPDRAWITEMSTRUCT>(lParam);
+        if (dis->CtlType != ODT_BUTTON) break;
+
+        bool pressed  = (dis->itemState & ODS_SELECTED) != 0;
+        bool disabled = (dis->itemState & ODS_DISABLED)  != 0;
+
+        COLORREF clrN, clrP;
+        switch (dis->CtlID) {
+        case IDC_BTN_ADD_TRUST:        clrN = CLR_BTN_QS;  clrP = CLR_BTN_QS_P;  break;
+        case IDC_BTN_ADD_TRUST_FOLDER: clrN = CLR_BTN_CS;  clrP = CLR_BTN_CS_P;  break;
+        case IDC_BTN_ADD_TRUST_MD5:    clrN = CLR_BTN_TZ;  clrP = CLR_BTN_TZ_P;  break;
+        case IDC_BTN_REMOVE_TRUST:     clrN = CLR_BTN_RED; clrP = CLR_BTN_RED_P; break;
+        default:                       clrN = CLR_BTN_DIS; clrP = RGB(30,41,59); break;
+        }
+        COLORREF fill = disabled ? CLR_BTN_DIS : (pressed ? clrP : clrN);
+
+        HDC dc  = dis->hDC;
+        RECT rc = dis->rcItem;
+        HBRUSH hbr = CreateSolidBrush(fill);
+        HPEN   hpn = CreatePen(PS_SOLID, 0, fill);
+        auto ob = SelectObject(dc, hbr);
+        auto op = SelectObject(dc, hpn);
+        RoundRect(dc, rc.left, rc.top, rc.right, rc.bottom, 8, 8);
+        SelectObject(dc, ob); SelectObject(dc, op);
+        DeleteObject(hbr);   DeleteObject(hpn);
+
+        if (pressed) OffsetRect(&rc, 0, 1);
+        SetBkMode(dc, TRANSPARENT);
+        SetTextColor(dc, RGB(255, 255, 255));
+        if (g_hFontBtn) SelectObject(dc, g_hFontBtn);
+        wchar_t text[64] = {};
+        GetWindowTextW(dis->hwndItem, text, 64);
+        DrawTextW(dc, text, -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         break;
     }
 
@@ -299,7 +392,6 @@ LRESULT CALLBACK TrustZoneDlgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM
             }
 
         } else if (id == IDC_BTN_ADD_TRUST_MD5) {
-            // Let user pick a file; we compute its MD5 and trust that hash
             std::wstring file = OpenFileDlg(hWnd);
             if (!file.empty()) {
                 std::string md5 = CalcFileMD5(file);
@@ -332,9 +424,19 @@ LRESULT CALLBACK TrustZoneDlgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM
         break;
     }
 
-    case WM_CLOSE:   DestroyWindow(hWnd); break;
-    case WM_DESTROY: g_hTrustDlg = nullptr; hList = nullptr; break;
-    default: return DefWindowProc(hWnd, message, wParam, lParam);
+    case WM_CLOSE:
+        DestroyWindow(hWnd);
+        break;
+
+    case WM_DESTROY:
+        if (hBrushList) { DeleteObject(hBrushList); hBrushList = nullptr; }
+        if (hFontTitle) { DeleteObject(hFontTitle); hFontTitle = nullptr; }
+        g_hTrustDlg = nullptr;
+        hList = nullptr;
+        break;
+
+    default:
+        return DefWindowProc(hWnd, message, wParam, lParam);
     }
     return 0;
 }
