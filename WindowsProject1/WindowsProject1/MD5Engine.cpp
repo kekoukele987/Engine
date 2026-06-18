@@ -7,6 +7,10 @@
 
 #pragma comment(lib, "advapi32.lib")
 
+// ---------------------------------------------------------------------------
+// MD5 calculation
+// ---------------------------------------------------------------------------
+
 static std::string CalcMD5(const std::wstring& filePath)
 {
     std::string result;
@@ -48,14 +52,18 @@ done:
     return result;
 }
 
+// ---------------------------------------------------------------------------
+// MD5 list loader
+// ---------------------------------------------------------------------------
+
 static std::set<std::string> LoadList(const std::wstring& path)
 {
     std::set<std::string> s;
     std::ifstream f(path);
     std::string line;
     while (std::getline(f, line)) {
-        size_t a = line.find_first_not_of(" \t\r\n");
-        if (a == std::string::npos) continue;
+        size_t a = line.find_first_not_of(" \t\r\n#");
+        if (a == std::string::npos || line[a] == '#') continue;
         size_t b = line.find_last_not_of(" \t\r\n");
         line = line.substr(a, b - a + 1);
         std::transform(line.begin(), line.end(), line.begin(), ::tolower);
@@ -64,7 +72,10 @@ static std::set<std::string> LoadList(const std::wstring& path)
     return s;
 }
 
-// Look for data/ next to the exe first, then fall back to the working directory.
+// ---------------------------------------------------------------------------
+// Data directory resolution
+// ---------------------------------------------------------------------------
+
 static std::wstring DataDir()
 {
     wchar_t buf[MAX_PATH];
@@ -78,6 +89,10 @@ static std::wstring DataDir()
 
     return L"data\\";
 }
+
+// ---------------------------------------------------------------------------
+// Single-file scan (used by custom scan button)
+// ---------------------------------------------------------------------------
 
 ScanReport ScanFile(const std::wstring& filePath)
 {
@@ -93,4 +108,124 @@ ScanReport ScanFile(const std::wstring& filePath)
     if (black.count(r.md5))      r.result = ScanResult::Black;
     else if (white.count(r.md5)) r.result = ScanResult::White;
     return r;
+}
+
+// ---------------------------------------------------------------------------
+// Quick scan: directory definitions
+// ---------------------------------------------------------------------------
+
+struct ScanDirEntry {
+    const wchar_t* envPath;
+    bool           recursive;
+};
+
+static const ScanDirEntry kQuickScanDirs[] = {
+    // Windows system core
+    { L"%SystemRoot%\\System32",                                               false },
+    { L"%SystemRoot%\\SysWOW64",                                               false },
+    { L"%SystemRoot%\\System32\\drivers",                                      true  },
+    { L"%SystemRoot%",                                                         false },
+
+    // Autostart locations
+    { L"%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup",         true  },
+    { L"%ProgramData%\\Microsoft\\Windows\\Start Menu\\Programs\\StartUp",     true  },
+
+    // Temp directories (common malware drop zone)
+    { L"%SystemRoot%\\Temp",                                                   false },
+    { L"%TEMP%",                                                               false },
+    { L"%LOCALAPPDATA%\\Temp",                                                 false },
+
+    // High-risk user directories
+    { L"%USERPROFILE%\\Downloads",                                             false },
+    { L"%USERPROFILE%\\Desktop",                                               false },
+    { L"%APPDATA%",                                                            false },
+};
+
+// File extensions to scan
+static const wchar_t* kScanExts[] = {
+    L".exe", L".dll", L".sys", L".drv", L".scr", L".com",
+    L".bat", L".cmd", L".vbs", L".js",  L".ps1", L".hta",
+    nullptr
+};
+
+static bool IsTargetExt(const wchar_t* filename)
+{
+    const wchar_t* ext = wcsrchr(filename, L'.');
+    if (!ext) return false;
+    for (int i = 0; kScanExts[i]; ++i)
+        if (_wcsicmp(ext, kScanExts[i]) == 0) return true;
+    return false;
+}
+
+// ---------------------------------------------------------------------------
+// Directory enumerator
+// ---------------------------------------------------------------------------
+
+static void ScanDirectory(
+    const std::wstring&        dir,
+    bool                       recursive,
+    const std::set<std::string>& black,
+    const std::set<std::string>& white,
+    QuickScanStats&            stats,
+    ProgressFn&                onProgress)
+{
+    WIN32_FIND_DATAW fd;
+    HANDLE hFind = FindFirstFileW((dir + L"\\*").c_str(), &fd);
+    if (hFind == INVALID_HANDLE_VALUE) return;
+
+    do {
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            if (recursive &&
+                wcscmp(fd.cFileName, L".") != 0 &&
+                wcscmp(fd.cFileName, L"..") != 0)
+            {
+                ScanDirectory(dir + L"\\" + fd.cFileName, true,
+                              black, white, stats, onProgress);
+            }
+            continue;
+        }
+
+        if (!IsTargetExt(fd.cFileName)) continue;
+
+        std::wstring filePath = dir + L"\\" + fd.cFileName;
+        std::string  md5      = CalcMD5(filePath);
+
+        int total = stats.black + stats.white + stats.unknown + stats.errors;
+        if (onProgress) onProgress(filePath, total + 1);
+
+        if (md5.empty()) {
+            ++stats.errors;
+        } else if (black.count(md5)) {
+            ++stats.black;
+            stats.blackFiles.push_back(filePath);
+        } else if (white.count(md5)) {
+            ++stats.white;
+        } else {
+            ++stats.unknown;
+        }
+
+    } while (FindNextFileW(hFind, &fd));
+
+    FindClose(hFind);
+}
+
+// ---------------------------------------------------------------------------
+// Quick scan entry point
+// ---------------------------------------------------------------------------
+
+QuickScanStats QuickScan(ProgressFn onProgress)
+{
+    QuickScanStats stats;
+
+    std::wstring dir   = DataDir();
+    auto         black = LoadList(dir + L"black.dat");
+    auto         white  = LoadList(dir + L"white.dat");
+
+    for (auto& entry : kQuickScanDirs) {
+        wchar_t expanded[MAX_PATH];
+        ExpandEnvironmentStringsW(entry.envPath, expanded, MAX_PATH);
+        ScanDirectory(expanded, entry.recursive, black, white, stats, onProgress);
+    }
+
+    return stats;
 }

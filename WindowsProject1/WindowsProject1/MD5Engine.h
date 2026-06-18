@@ -1,5 +1,7 @@
 #pragma once
 #include <string>
+#include <vector>
+#include <functional>
 
 enum class ScanResult { Black, White, Unknown };
 
@@ -8,4 +10,15 @@ struct ScanReport {
     ScanResult  result;
 };
 
-ScanReport ScanFile(const std::wstring& filePath);
+struct QuickScanStats {
+    int black   = 0;
+    int white   = 0;
+    int unknown = 0;
+    int errors  = 0;
+    std::vector<std::wstring> blackFiles;
+};
+
+using ProgressFn = std::function<void(const std::wstring& currentFile, int totalScanned)>;
+
+ScanReport     ScanFile(const std::wstring& filePath);
+QuickScanStats QuickScan(ProgressFn onProgress);

@@ -1,5 +1,4 @@
-﻿// WindowsProject1.cpp : 定义应用程序的入口点。
-//
+﻿// WindowsProject1.cpp
 
 #include "framework.h"
 #include "WindowsProject1.h"
@@ -9,144 +8,137 @@
 
 #pragma comment(lib, "Comdlg32.lib")
 
-#define MAX_LOADSTRING 100
+#define MAX_LOADSTRING  100
+#define WM_SCAN_DONE   (WM_APP + 1)
 
-// 全局变量:
-HINSTANCE hInst;                                // 当前实例
-WCHAR szTitle[MAX_LOADSTRING];                  // 标题栏文本
-WCHAR szWindowClass[MAX_LOADSTRING];            // 主窗口类名
+// ---------------------------------------------------------------------------
+// Globals
+// ---------------------------------------------------------------------------
+
+HINSTANCE hInst;
+WCHAR     szTitle[MAX_LOADSTRING];
+WCHAR     szWindowClass[MAX_LOADSTRING];
 
 HWND hBtnQuickScan  = nullptr;
 HWND hBtnCustomScan = nullptr;
 
-#define BTN_W 160
-#define BTN_H  60
-#define BTN_GAP 20
+#define BTN_W   160
+#define BTN_H    60
+#define BTN_GAP  20
 
-// 此代码模块中包含的函数的前向声明:
-ATOM                MyRegisterClass(HINSTANCE hInstance);
-BOOL                InitInstance(HINSTANCE, int);
-LRESULT CALLBACK    WndProc(HWND, UINT, WPARAM, LPARAM);
-INT_PTR CALLBACK    About(HWND, UINT, WPARAM, LPARAM);
+static HANDLE        g_hScanThread = nullptr;
+static QuickScanStats g_scanStats;
+
+// ---------------------------------------------------------------------------
+// Forward declarations
+// ---------------------------------------------------------------------------
+
+ATOM             MyRegisterClass(HINSTANCE hInstance);
+BOOL             InitInstance(HINSTANCE, int);
+LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
+INT_PTR CALLBACK About(HWND, UINT, WPARAM, LPARAM);
+
+// ---------------------------------------------------------------------------
+// wWinMain
+// ---------------------------------------------------------------------------
 
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
-                     _In_opt_ HINSTANCE hPrevInstance,
-                     _In_ LPWSTR    lpCmdLine,
-                     _In_ int       nCmdShow)
+                      _In_opt_ HINSTANCE hPrevInstance,
+                      _In_ LPWSTR lpCmdLine,
+                      _In_ int    nCmdShow)
 {
     UNREFERENCED_PARAMETER(hPrevInstance);
     UNREFERENCED_PARAMETER(lpCmdLine);
 
-    // TODO: 在此处放置代码。
-
-    // 初始化全局字符串
-    LoadStringW(hInstance, IDS_APP_TITLE, szTitle, MAX_LOADSTRING);
-    LoadStringW(hInstance, IDC_WINDOWSPROJECT1, szWindowClass, MAX_LOADSTRING);
+    LoadStringW(hInstance, IDS_APP_TITLE,        szTitle,       MAX_LOADSTRING);
+    LoadStringW(hInstance, IDC_WINDOWSPROJECT1,  szWindowClass, MAX_LOADSTRING);
     MyRegisterClass(hInstance);
 
-    // 执行应用程序初始化:
-    if (!InitInstance (hInstance, nCmdShow))
-    {
-        return FALSE;
-    }
+    if (!InitInstance(hInstance, nCmdShow)) return FALSE;
 
-    HACCEL hAccelTable = LoadAccelerators(hInstance, MAKEINTRESOURCE(IDC_WINDOWSPROJECT1));
-
+    HACCEL hAccel = LoadAccelerators(hInstance, MAKEINTRESOURCE(IDC_WINDOWSPROJECT1));
     MSG msg;
-
-    // 主消息循环:
-    while (GetMessage(&msg, nullptr, 0, 0))
-    {
-        if (!TranslateAccelerator(msg.hwnd, hAccelTable, &msg))
-        {
+    while (GetMessage(&msg, nullptr, 0, 0)) {
+        if (!TranslateAccelerator(msg.hwnd, hAccel, &msg)) {
             TranslateMessage(&msg);
             DispatchMessage(&msg);
         }
     }
-
-    return (int) msg.wParam;
+    return (int)msg.wParam;
 }
 
+// ---------------------------------------------------------------------------
+// Window class registration
+// ---------------------------------------------------------------------------
 
-
-//
-//  函数: MyRegisterClass()
-//
-//  目标: 注册窗口类。
-//
 ATOM MyRegisterClass(HINSTANCE hInstance)
 {
-    WNDCLASSEXW wcex;
-
-    wcex.cbSize = sizeof(WNDCLASSEX);
-
+    WNDCLASSEXW wcex    = {};
+    wcex.cbSize         = sizeof(WNDCLASSEX);
     wcex.style          = CS_HREDRAW | CS_VREDRAW;
     wcex.lpfnWndProc    = WndProc;
-    wcex.cbClsExtra     = 0;
-    wcex.cbWndExtra     = 0;
     wcex.hInstance      = hInstance;
     wcex.hIcon          = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_WINDOWSPROJECT1));
     wcex.hCursor        = LoadCursor(nullptr, IDC_ARROW);
-    wcex.hbrBackground  = (HBRUSH)(COLOR_WINDOW+1);
+    wcex.hbrBackground  = (HBRUSH)(COLOR_WINDOW + 1);
     wcex.lpszMenuName   = MAKEINTRESOURCEW(IDC_WINDOWSPROJECT1);
     wcex.lpszClassName  = szWindowClass;
-    wcex.hIconSm        = LoadIcon(wcex.hInstance, MAKEINTRESOURCE(IDI_SMALL));
-
+    wcex.hIconSm        = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_SMALL));
     return RegisterClassExW(&wcex);
 }
 
-//
-//   函数: InitInstance(HINSTANCE, int)
-//
-//   目标: 保存实例句柄并创建主窗口
-//
-//   注释:
-//
-//        在此函数中，我们在全局变量中保存实例句柄并
-//        创建和显示主程序窗口。
-//
+// ---------------------------------------------------------------------------
+// InitInstance
+// ---------------------------------------------------------------------------
+
 BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 {
-   hInst = hInstance; // 将实例句柄存储在全局变量中
-
-   HWND hWnd = CreateWindowW(szWindowClass, szTitle, WS_OVERLAPPEDWINDOW,
-      CW_USEDEFAULT, 0, CW_USEDEFAULT, 0, nullptr, nullptr, hInstance, nullptr);
-
-   if (!hWnd)
-   {
-      return FALSE;
-   }
-
-   ShowWindow(hWnd, nCmdShow);
-   UpdateWindow(hWnd);
-
-   return TRUE;
+    hInst = hInstance;
+    HWND hWnd = CreateWindowW(szWindowClass, szTitle, WS_OVERLAPPEDWINDOW,
+        CW_USEDEFAULT, 0, 900, 600, nullptr, nullptr, hInstance, nullptr);
+    if (!hWnd) return FALSE;
+    ShowWindow(hWnd, nCmdShow);
+    UpdateWindow(hWnd);
+    return TRUE;
 }
 
-//
-//  函数: WndProc(HWND, UINT, WPARAM, LPARAM)
-//
-//  目标: 处理主窗口的消息。
-//
-//  WM_COMMAND  - 处理应用程序菜单
-//  WM_PAINT    - 绘制主窗口
-//  WM_DESTROY  - 发送退出消息并返回
-//
-//
+// ---------------------------------------------------------------------------
+// Quick scan background thread
+// ---------------------------------------------------------------------------
+
+static DWORD WINAPI ScanThread(LPVOID param)
+{
+    HWND hWnd = (HWND)param;
+
+    g_scanStats = QuickScan([hWnd](const std::wstring& file, int total) {
+        wchar_t title[512];
+        swprintf_s(title, L"扫描中... 已扫描 %d 个文件 | %s",
+            total, file.substr(file.find_last_of(L"\\/") + 1).c_str());
+        SetWindowTextW(hWnd, title);
+    });
+
+    PostMessageW(hWnd, WM_SCAN_DONE, 0, 0);
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Custom scan: single-file dialog
+// ---------------------------------------------------------------------------
+
 static std::wstring OpenFileDlg(HWND hWnd)
 {
     wchar_t path[MAX_PATH] = {};
-    OPENFILENAMEW ofn      = {};
-    ofn.lStructSize        = sizeof ofn;
-    ofn.hwndOwner          = hWnd;
-    ofn.lpstrFile          = path;
-    ofn.nMaxFile           = MAX_PATH;
-    ofn.lpstrFilter        = L"所有文件\0*.*\0可执行文件\0*.exe;*.dll\0";
-    ofn.Flags              = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+    OPENFILENAMEW ofn = {};
+    ofn.lStructSize   = sizeof ofn;
+    ofn.hwndOwner     = hWnd;
+    ofn.lpstrFile     = path;
+    ofn.nMaxFile      = MAX_PATH;
+    ofn.lpstrFilter   = L"所有文件\0*.*\0可执行文件\0*.exe;*.dll\0";
+    ofn.Flags         = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
     return GetOpenFileNameW(&ofn) ? path : L"";
 }
 
-static void DoScan(HWND hWnd, const wchar_t* title)
+static void DoCustomScan(HWND hWnd)
 {
     std::wstring file = OpenFileDlg(hWnd);
     if (file.empty()) return;
@@ -159,92 +151,145 @@ static void DoScan(HWND hWnd, const wchar_t* title)
     wchar_t msg[1024];
     if (r.result == ScanResult::Black) {
         swprintf_s(msg, L"发现威胁！\n\n文件：%s\nMD5 ：%s\n\n状态：黑名单病毒文件", file.c_str(), md5W);
-        MessageBoxW(hWnd, msg, title, MB_OK | MB_ICONERROR);
-    }
-    else if (r.result == ScanResult::White) {
+        MessageBoxW(hWnd, msg, L"自定义扫描", MB_OK | MB_ICONERROR);
+    } else if (r.result == ScanResult::White) {
         swprintf_s(msg, L"文件安全\n\n文件：%s\nMD5 ：%s\n\n状态：白名单安全文件", file.c_str(), md5W);
-        MessageBoxW(hWnd, msg, title, MB_OK | MB_ICONINFORMATION);
-    }
-    else {
+        MessageBoxW(hWnd, msg, L"自定义扫描", MB_OK | MB_ICONINFORMATION);
+    } else {
         swprintf_s(msg, L"未知文件\n\n文件：%s\nMD5 ：%s\n\n状态：不在数据库中", file.c_str(), md5W);
-        MessageBoxW(hWnd, msg, title, MB_OK | MB_ICONWARNING);
+        MessageBoxW(hWnd, msg, L"自定义扫描", MB_OK | MB_ICONWARNING);
     }
 }
+
+// ---------------------------------------------------------------------------
+// Button layout
+// ---------------------------------------------------------------------------
 
 static void RepositionButtons(HWND hWnd)
 {
     RECT rc;
     GetClientRect(hWnd, &rc);
-    int cx = (rc.right  - rc.left) / 2;
-    int cy = (rc.bottom - rc.top)  / 2;
-    int totalW = BTN_W * 2 + BTN_GAP;
-    int startX = cx - totalW / 2;
+    int cx     = (rc.right - rc.left) / 2;
+    int cy     = (rc.bottom - rc.top) / 2;
+    int startX = cx - (BTN_W * 2 + BTN_GAP) / 2;
     int startY = cy - BTN_H / 2;
-    SetWindowPos(hBtnQuickScan,  nullptr, startX,             startY, BTN_W, BTN_H, SWP_NOZORDER);
-    SetWindowPos(hBtnCustomScan, nullptr, startX + BTN_W + BTN_GAP, startY, BTN_W, BTN_H, SWP_NOZORDER);
+    SetWindowPos(hBtnQuickScan,  nullptr, startX,                    startY, BTN_W, BTN_H, SWP_NOZORDER);
+    SetWindowPos(hBtnCustomScan, nullptr, startX + BTN_W + BTN_GAP,  startY, BTN_W, BTN_H, SWP_NOZORDER);
 }
+
+// ---------------------------------------------------------------------------
+// WndProc
+// ---------------------------------------------------------------------------
 
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     switch (message)
     {
     case WM_CREATE:
-        hBtnQuickScan = CreateWindowW(
-            L"BUTTON", L"快速扫描",
+        hBtnQuickScan = CreateWindowW(L"BUTTON", L"快速扫描",
             WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-            0, 0, BTN_W, BTN_H,
-            hWnd, (HMENU)IDC_BTN_QUICK_SCAN, hInst, nullptr);
+            0, 0, BTN_W, BTN_H, hWnd, (HMENU)IDC_BTN_QUICK_SCAN, hInst, nullptr);
 
-        hBtnCustomScan = CreateWindowW(
-            L"BUTTON", L"自定义扫描",
+        hBtnCustomScan = CreateWindowW(L"BUTTON", L"自定义扫描",
             WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-            0, 0, BTN_W, BTN_H,
-            hWnd, (HMENU)IDC_BTN_CUSTOM_SCAN, hInst, nullptr);
+            0, 0, BTN_W, BTN_H, hWnd, (HMENU)IDC_BTN_CUSTOM_SCAN, hInst, nullptr);
         break;
 
     case WM_SIZE:
         RepositionButtons(hWnd);
         break;
 
-    case WM_COMMAND:
-        {
-            int wmId = LOWORD(wParam);
-            switch (wmId)
-            {
-            case IDC_BTN_QUICK_SCAN:
-                DoScan(hWnd, L"快速扫描");
-                break;
-            case IDC_BTN_CUSTOM_SCAN:
-                DoScan(hWnd, L"自定义扫描");
-                break;
-            case IDM_ABOUT:
-                DialogBox(hInst, MAKEINTRESOURCE(IDD_ABOUTBOX), hWnd, About);
-                break;
-            case IDM_EXIT:
-                DestroyWindow(hWnd);
-                break;
-            default:
-                return DefWindowProc(hWnd, message, wParam, lParam);
+    case WM_SCAN_DONE:
+    {
+        // Restore title
+        SetWindowTextW(hWnd, szTitle);
+
+        // Re-enable buttons
+        EnableWindow(hBtnQuickScan,  TRUE);
+        EnableWindow(hBtnCustomScan, TRUE);
+
+        // Close thread handle
+        if (g_hScanThread) { CloseHandle(g_hScanThread); g_hScanThread = nullptr; }
+
+        // Build result message
+        auto& r = g_scanStats;
+        int   total = r.black + r.white + r.unknown + r.errors;
+
+        wchar_t msg[2048];
+        swprintf_s(msg,
+            L"扫描完成！\n\n"
+            L"共扫描文件：%d 个\n"
+            L"黑名单（威胁）：%d 个\n"
+            L"白名单（安全）：%d 个\n"
+            L"未知文件：%d 个\n"
+            L"读取失败：%d 个",
+            total, r.black, r.white, r.unknown, r.errors);
+
+        if (!r.blackFiles.empty()) {
+            wcscat_s(msg, L"\n\n威胁文件列表：\n");
+            for (auto& f : r.blackFiles) {
+                if (wcslen(msg) + f.size() + 2 < 2000)
+                    wcscat_s(msg, (f + L"\n").c_str());
             }
         }
+
+        UINT icon = r.black > 0 ? MB_ICONERROR : MB_ICONINFORMATION;
+        MessageBoxW(hWnd, msg, L"快速扫描结果", MB_OK | icon);
         break;
-    case WM_PAINT:
+    }
+
+    case WM_COMMAND:
+    {
+        int wmId = LOWORD(wParam);
+        switch (wmId)
         {
-            PAINTSTRUCT ps;
-            HDC hdc = BeginPaint(hWnd, &ps);
-            EndPaint(hWnd, &ps);
+        case IDC_BTN_QUICK_SCAN:
+            if (g_hScanThread) break;   // already running
+            EnableWindow(hBtnQuickScan,  FALSE);
+            EnableWindow(hBtnCustomScan, FALSE);
+            g_hScanThread = CreateThread(nullptr, 0, ScanThread, hWnd, 0, nullptr);
+            break;
+
+        case IDC_BTN_CUSTOM_SCAN:
+            DoCustomScan(hWnd);
+            break;
+
+        case IDM_ABOUT:
+            DialogBox(hInst, MAKEINTRESOURCE(IDD_ABOUTBOX), hWnd, About);
+            break;
+
+        case IDM_EXIT:
+            DestroyWindow(hWnd);
+            break;
+
+        default:
+            return DefWindowProc(hWnd, message, wParam, lParam);
         }
         break;
+    }
+
+    case WM_PAINT:
+    {
+        PAINTSTRUCT ps;
+        HDC hdc = BeginPaint(hWnd, &ps);
+        EndPaint(hWnd, &ps);
+        break;
+    }
+
     case WM_DESTROY:
         PostQuitMessage(0);
         break;
+
     default:
         return DefWindowProc(hWnd, message, wParam, lParam);
     }
     return 0;
 }
 
-// “关于”框的消息处理程序。
+// ---------------------------------------------------------------------------
+// About dialog
+// ---------------------------------------------------------------------------
+
 INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 {
     UNREFERENCED_PARAMETER(lParam);
@@ -252,10 +297,8 @@ INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
     {
     case WM_INITDIALOG:
         return (INT_PTR)TRUE;
-
     case WM_COMMAND:
-        if (LOWORD(wParam) == IDOK || LOWORD(wParam) == IDCANCEL)
-        {
+        if (LOWORD(wParam) == IDOK || LOWORD(wParam) == IDCANCEL) {
             EndDialog(hDlg, LOWORD(wParam));
             return (INT_PTR)TRUE;
         }
