@@ -121,7 +121,13 @@ struct ScanDirEntry {
 
 static const ScanDirEntry kQuickScanDirs[] = {
     // Windows system core
+    // 64-bit: System32 = real 64-bit dir, no redirection.
+    // 32-bit: WOW64 would redirect System32 -> SysWOW64; we disable that in QuickScan().
+#ifdef _WIN64
     { L"%SystemRoot%\\System32",                                               false },
+#else
+    { L"%SystemRoot%\\Sysnative",                                              false },  // virtual alias to real System32 for 32-bit processes
+#endif
     { L"%SystemRoot%\\SysWOW64",                                               false },
     { L"%SystemRoot%\\System32\\drivers",                                      true  },
     { L"%SystemRoot%",                                                         false },
@@ -217,6 +223,13 @@ QuickScanStats QuickScan(ProgressFn onProgress)
 {
     QuickScanStats stats;
 
+#ifndef _WIN64
+    // On a 32-bit process running on 64-bit Windows, WOW64 silently redirects
+    // System32 -> SysWOW64. Disable that so we scan the real 64-bit System32.
+    PVOID wow64OldValue = nullptr;
+    BOOL  wow64Disabled = Wow64DisableWow64FsRedirection(&wow64OldValue);
+#endif
+
     std::wstring dir   = DataDir();
     auto         black = LoadList(dir + L"black.dat");
     auto         white  = LoadList(dir + L"white.dat");
@@ -226,6 +239,11 @@ QuickScanStats QuickScan(ProgressFn onProgress)
         ExpandEnvironmentStringsW(entry.envPath, expanded, MAX_PATH);
         ScanDirectory(expanded, entry.recursive, black, white, stats, onProgress);
     }
+
+#ifndef _WIN64
+    if (wow64Disabled)
+        Wow64RevertWow64FsRedirection(wow64OldValue);
+#endif
 
     return stats;
 }
