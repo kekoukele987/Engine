@@ -34,6 +34,18 @@ static HANDLE         g_hScanThread = nullptr;
 static QuickScanStats g_scanStats;
 static HWND           g_hTrustDlg  = nullptr;
 
+static std::wstring ComputeDataDir()
+{
+    wchar_t buf[MAX_PATH];
+    GetModuleFileNameW(nullptr, buf, MAX_PATH);
+    std::wstring p(buf);
+    auto pos = p.find_last_of(L"\\/");
+    std::wstring exeDir = (pos != std::wstring::npos) ? p.substr(0, pos + 1) : L"";
+    if (GetFileAttributesW((exeDir + L"data\\black.dat").c_str()) != INVALID_FILE_ATTRIBUTES)
+        return exeDir + L"data\\";
+    return L"data\\";
+}
+
 // ---------------------------------------------------------------------------
 // Forward declarations
 // ---------------------------------------------------------------------------
@@ -220,8 +232,6 @@ LRESULT CALLBACK TrustZoneDlgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM
 
     case WM_DESTROY:
         g_hTrustDlg = nullptr;
-        EnableWindow(GetParent(hWnd), TRUE);
-        SetForegroundWindow(GetParent(hWnd));
         hList = nullptr;
         break;
 
@@ -373,12 +383,16 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
         case IDC_BTN_TRUST_ZONE:
             if (g_hTrustDlg) { SetForegroundWindow(g_hTrustDlg); break; }
-            EnableWindow(hWnd, FALSE);
+            // Load trust zone data before opening dialog
+            TrustZone::Instance().Load(ComputeDataDir());
             g_hTrustDlg = CreateWindowW(kTrustDlgClass, L"信任区管理",
-                WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
+                WS_OVERLAPPEDWINDOW & ~WS_MAXIMIZEBOX & ~WS_THICKFRAME,
                 CW_USEDEFAULT, CW_USEDEFAULT, 640, 440,
                 hWnd, nullptr, hInst, nullptr);
-            ShowWindow(g_hTrustDlg, SW_SHOW);
+            if (g_hTrustDlg) {
+                ShowWindow(g_hTrustDlg, SW_SHOW);
+                SetForegroundWindow(g_hTrustDlg);
+            }
             break;
 
         case IDM_ABOUT:
