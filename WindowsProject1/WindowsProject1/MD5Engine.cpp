@@ -1,5 +1,6 @@
 #include "framework.h"
 #include "MD5Engine.h"
+#include "TrustZone.h"
 #include <wincrypt.h>
 #include <fstream>
 #include <set>
@@ -98,10 +99,18 @@ ScanReport ScanFile(const std::wstring& filePath)
 {
     ScanReport r;
     r.result = ScanResult::Unknown;
-    r.md5    = CalcMD5(filePath);
-    if (r.md5.empty()) return r;
 
     std::wstring dir = DataDir();
+    TrustZone::Instance().Load(dir);
+
+    if (TrustZone::Instance().IsTrusted(filePath)) {
+        r.result = ScanResult::White;
+        return r;
+    }
+
+    r.md5 = CalcMD5(filePath);
+    if (r.md5.empty()) return r;
+
     auto black = LoadList(dir + L"black.dat");
     auto white  = LoadList(dir + L"white.dat");
 
@@ -194,11 +203,16 @@ static void ScanDirectory(
         if (!IsTargetExt(fd.cFileName)) continue;
 
         std::wstring filePath = dir + L"\\" + fd.cFileName;
-        std::string  md5      = CalcMD5(filePath);
 
         int total = stats.black + stats.white + stats.unknown + stats.errors;
         if (onProgress) onProgress(filePath, total + 1);
 
+        if (TrustZone::Instance().IsTrusted(filePath)) {
+            ++stats.white;
+            continue;
+        }
+
+        std::string md5 = CalcMD5(filePath);
         if (md5.empty()) {
             ++stats.errors;
         } else if (black.count(md5)) {
@@ -231,6 +245,7 @@ QuickScanStats QuickScan(ProgressFn onProgress)
 #endif
 
     std::wstring dir   = DataDir();
+    TrustZone::Instance().Load(dir);
     auto         black = LoadList(dir + L"black.dat");
     auto         white  = LoadList(dir + L"white.dat");
 

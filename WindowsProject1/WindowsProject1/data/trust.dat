@@ -1,0 +1,2 @@
+# Trust Zone - one file path per line
+# Files listed here are always treated as safe (White), regardless of MD5.
