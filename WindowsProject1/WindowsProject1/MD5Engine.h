@@ -21,5 +21,5 @@ struct QuickScanStats {
 using ProgressFn = std::function<void(const std::wstring& currentFile, int totalScanned)>;
 
 ScanReport     ScanFile(const std::wstring& filePath);
-QuickScanStats QuickScan(ProgressFn onProgress);
+QuickScanStats QuickScan(ProgressFn onProgress, int threadCount = 1);
 std::string    CalcFileMD5(const std::wstring& filePath);

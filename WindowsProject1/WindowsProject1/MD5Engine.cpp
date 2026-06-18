@@ -4,6 +4,7 @@
 #include <wincrypt.h>
 #include <fstream>
 #include <set>
+#include <vector>
 #include <algorithm>
 
 #pragma comment(lib, "advapi32.lib")
@@ -246,29 +247,71 @@ static void ScanDirectory(
 }
 
 // ---------------------------------------------------------------------------
-// Quick scan entry point
+// Multi-thread quick scan
 // ---------------------------------------------------------------------------
 
-QuickScanStats QuickScan(ProgressFn onProgress)
+struct WorkerData {
+    int                          startIdx;
+    int                          dirCount;
+    const std::set<std::string>* pBlack;
+    const std::set<std::string>* pWhite;
+    ProgressFn                   onProgress;
+    QuickScanStats               stats;
+};
+
+static DWORD WINAPI QuickScanWorker(LPVOID param)
 {
-    QuickScanStats stats;
+    auto* d = static_cast<WorkerData*>(param);
+    for (int i = d->startIdx; i < d->startIdx + d->dirCount; ++i) {
+        wchar_t expanded[MAX_PATH];
+        ExpandEnvironmentStringsW(kQuickScanDirs[i].envPath, expanded, MAX_PATH);
+        ScanDirectory(expanded, kQuickScanDirs[i].recursive,
+                      *d->pBlack, *d->pWhite, d->stats, d->onProgress);
+    }
+    return 0;
+}
+
+QuickScanStats QuickScan(ProgressFn onProgress, int threadCount)
+{
+    const int numDirs  = (int)(sizeof(kQuickScanDirs) / sizeof(kQuickScanDirs[0]));
+    const int nThreads = std::max(1, std::min(threadCount, numDirs));
 
 #ifndef _WIN64
-    // On a 32-bit process running on 64-bit Windows, WOW64 silently redirects
-    // System32 -> SysWOW64. Disable that so we scan the real 64-bit System32.
     PVOID wow64OldValue = nullptr;
     BOOL  wow64Disabled = Wow64DisableWow64FsRedirection(&wow64OldValue);
 #endif
 
-    std::wstring dir   = DataDir();
+    std::wstring dir = DataDir();
     TrustZone::Instance().Load(dir);
-    auto         black = LoadList(dir + L"black.dat");
-    auto         white  = LoadList(dir + L"white.dat");
+    auto black = LoadList(dir + L"black.dat");
+    auto white  = LoadList(dir + L"white.dat");
 
-    for (auto& entry : kQuickScanDirs) {
-        wchar_t expanded[MAX_PATH];
-        ExpandEnvironmentStringsW(entry.envPath, expanded, MAX_PATH);
-        ScanDirectory(expanded, entry.recursive, black, white, stats, onProgress);
+    // Thread-safe progress: shared atomic counter, per-thread totals ignored
+    volatile LONG sharedTotal = 0;
+    ProgressFn safeProgress = [&](const std::wstring& file, int) {
+        LONG t = InterlockedIncrement(&sharedTotal);
+        if (onProgress) onProgress(file, (int)t);
+    };
+
+    // Distribute directories across workers
+    std::vector<WorkerData> workers(nThreads);
+    int base = numDirs / nThreads, extra = numDirs % nThreads, idx = 0;
+    for (int i = 0; i < nThreads; ++i) {
+        workers[i] = { idx, base + (i < extra ? 1 : 0), &black, &white, safeProgress, {} };
+        idx += workers[i].dirCount;
+    }
+
+    // Launch threads (run in-place if CreateThread fails)
+    std::vector<HANDLE> handles;
+    handles.reserve(nThreads);
+    for (int i = 0; i < nThreads; ++i) {
+        HANDLE h = CreateThread(nullptr, 0, QuickScanWorker, &workers[i], 0, nullptr);
+        if (h) handles.push_back(h);
+        else    QuickScanWorker(&workers[i]);
+    }
+    if (!handles.empty()) {
+        WaitForMultipleObjects((DWORD)handles.size(), handles.data(), TRUE, INFINITE);
+        for (HANDLE h : handles) CloseHandle(h);
     }
 
 #ifndef _WIN64
@@ -276,5 +319,16 @@ QuickScanStats QuickScan(ProgressFn onProgress)
         Wow64RevertWow64FsRedirection(wow64OldValue);
 #endif
 
-    return stats;
+    // Merge per-thread stats
+    QuickScanStats result;
+    for (auto& w : workers) {
+        result.black   += w.stats.black;
+        result.white   += w.stats.white;
+        result.unknown += w.stats.unknown;
+        result.errors  += w.stats.errors;
+        result.blackFiles.insert(result.blackFiles.end(),
+                                 w.stats.blackFiles.begin(),
+                                 w.stats.blackFiles.end());
+    }
+    return result;
 }

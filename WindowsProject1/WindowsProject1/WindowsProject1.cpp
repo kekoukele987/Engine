@@ -89,6 +89,7 @@ static HANDLE         g_hScanThread   = nullptr;
 static QuickScanStats g_scanStats;
 static HWND           g_hTrustDlg    = nullptr;
 static HWND           g_hSettingsDlg = nullptr;
+static int            g_scanThreadCount = 4;
 
 static HBRUSH g_hBrushBg = nullptr;
 static HFONT  g_hFontTitle = nullptr;
@@ -513,42 +514,47 @@ static void ApplyLanguage(HWND hMainWnd)
 // Settings dialog
 // ---------------------------------------------------------------------------
 
+// Y layout constants for settings dialog content
+static const int kSLangLabelY  = TRUST_HEADER_H + 18;   // "界面语言" label
+static const int kSLangOpt1Y   = TRUST_HEADER_H + 44;   // 中文 button
+static const int kSLangOpt2Y   = TRUST_HEADER_H + 98;   // English button
+static const int kSThdLabelY   = TRUST_HEADER_H + 160;  // "扫描线程数" label
+static const int kSThdBtnY     = TRUST_HEADER_H + 184;  // thread count buttons
+
 LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
-    static HFONT  hFontTitle  = nullptr;
-    static HBRUSH hBrushLabel = nullptr;
+    static HFONT hFontTitle = nullptr;
 
     switch (message)
     {
     case WM_CREATE:
     {
-        hFontTitle  = MakeFont(13, true,  L"Microsoft YaHei");
-        hBrushLabel = CreateSolidBrush(CLR_BG);
+        hFontTitle = MakeFont(13, true, L"Microsoft YaHei");
 
         RECT rc; GetClientRect(hWnd, &rc);
-        int w = rc.right - rc.left;
-
-        // Section label
-        HWND hLabel = CreateWindowW(L"STATIC",
-            g_lang == AppLang::Chinese ? L"界面语言" : L"Language",
-            WS_CHILD | WS_VISIBLE,
-            20, TRUST_HEADER_H + 18, w - 40, 20,
-            hWnd, (HMENU)IDC_STATIC, hInst, nullptr);
-        if (g_hFontBtn) SendMessageW(hLabel, WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
-
-        // Language option buttons
-        int optY = TRUST_HEADER_H + 46;
+        int w   = rc.right - rc.left;
         int optW = w - 40;
-        HWND hZH = CreateWindowW(L"BUTTON", L"  中文 (Chinese)",
-            WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
-            20, optY,      optW, 46, hWnd, (HMENU)IDC_SETTINGS_LANG_ZH, hInst, nullptr);
-        HWND hEN = CreateWindowW(L"BUTTON", L"  English",
-            WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
-            20, optY + 54, optW, 46, hWnd, (HMENU)IDC_SETTINGS_LANG_EN, hInst, nullptr);
-        if (g_hFontBtn) {
-            SendMessageW(hZH, WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
-            SendMessageW(hEN, WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
-        }
+
+        auto mkBtn = [&](const wchar_t* txt, int x, int y, int bw, int bh, int id) {
+            HWND h = CreateWindowW(L"BUTTON", txt, WS_CHILD|WS_VISIBLE|BS_OWNERDRAW,
+                x, y, bw, bh, hWnd, (HMENU)(UINT_PTR)id, hInst, nullptr);
+            if (g_hFontBtn) SendMessageW(h, WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
+        };
+
+        // Language options (full width)
+        mkBtn(L"  中文 (Chinese)", 20, kSLangOpt1Y, optW, 46, IDC_SETTINGS_LANG_ZH);
+        mkBtn(L"  English",        20, kSLangOpt2Y, optW, 46, IDC_SETTINGS_LANG_EN);
+
+        // Thread count options (4 small buttons in a row)
+        static const struct { const wchar_t* label; int id; } kThd[] = {
+            { L"1", IDC_SETTINGS_THREADS_1 },
+            { L"2", IDC_SETTINGS_THREADS_2 },
+            { L"4", IDC_SETTINGS_THREADS_4 },
+            { L"8", IDC_SETTINGS_THREADS_8 },
+        };
+        int tbw = (optW - 24) / 4;  // button width (3 gaps of 8px)
+        for (int i = 0; i < 4; ++i)
+            mkBtn(kThd[i].label, 20 + i * (tbw + 8), kSThdBtnY, tbw, 40, kThd[i].id);
         break;
     }
 
@@ -571,22 +577,31 @@ LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
         PAINTSTRUCT ps;
         HDC hdc = BeginPaint(hWnd, &ps);
         SetBkMode(hdc, TRANSPARENT);
+
+        // Header title
         SetTextColor(hdc, CLR_TXT_MAIN);
         if (hFontTitle) SelectObject(hdc, hFontTitle);
         RECT rcT = { 0, 0, 420, TRUST_HEADER_H };
         DrawTextW(hdc,
             g_lang == AppLang::Chinese ? L"设置中心" : L"Settings",
             -1, &rcT, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+
+        // Section labels (muted, auto-update with language)
+        SetTextColor(hdc, CLR_TXT_SUB);
+        if (g_hFontBtn) SelectObject(hdc, g_hFontBtn);
+
+        RECT rcL1 = { 20, kSLangLabelY, 400, kSLangLabelY + 20 };
+        DrawTextW(hdc,
+            g_lang == AppLang::Chinese ? L"界面语言" : L"Language",
+            -1, &rcL1, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+
+        RECT rcL2 = { 20, kSThdLabelY, 400, kSThdLabelY + 20 };
+        DrawTextW(hdc,
+            g_lang == AppLang::Chinese ? L"扫描线程数" : L"Scan Threads",
+            -1, &rcL2, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+
         EndPaint(hWnd, &ps);
         break;
-    }
-
-    case WM_CTLCOLORSTATIC:
-    {
-        HDC hdc = (HDC)wParam;
-        SetTextColor(hdc, CLR_TXT_SUB);
-        SetBkMode(hdc, TRANSPARENT);
-        return (LRESULT)hBrushLabel;
     }
 
     case WM_DRAWITEM:
@@ -594,21 +609,22 @@ LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
         auto* dis = reinterpret_cast<LPDRAWITEMSTRUCT>(lParam);
         if (dis->CtlType != ODT_BUTTON) break;
 
-        bool selected =
-            (dis->CtlID == IDC_SETTINGS_LANG_ZH && g_lang == AppLang::Chinese) ||
-            (dis->CtlID == IDC_SETTINGS_LANG_EN && g_lang == AppLang::English);
+        bool selected = false;
+        switch (dis->CtlID) {
+        case IDC_SETTINGS_LANG_ZH:   selected = (g_lang == AppLang::Chinese);  break;
+        case IDC_SETTINGS_LANG_EN:   selected = (g_lang == AppLang::English);   break;
+        case IDC_SETTINGS_THREADS_1: selected = (g_scanThreadCount == 1); break;
+        case IDC_SETTINGS_THREADS_2: selected = (g_scanThreadCount == 2); break;
+        case IDC_SETTINGS_THREADS_4: selected = (g_scanThreadCount == 4); break;
+        case IDC_SETTINGS_THREADS_8: selected = (g_scanThreadCount == 8); break;
+        }
         bool pressed = (dis->itemState & ODS_SELECTED) != 0;
 
         HDC dc  = dis->hDC;
         RECT rc = dis->rcItem;
-
-        // Fill: accent if selected, dark list bg if not
-        COLORREF fillColor  = selected ? CLR_ACCENT : CLR_LIST_BG;
-        COLORREF penColor   = CLR_ACCENT;
-        HBRUSH hbr = CreateSolidBrush(fillColor);
-        HPEN   hpn = CreatePen(PS_SOLID, selected ? 0 : 1, penColor);
-        auto ob = SelectObject(dc, hbr);
-        auto op = SelectObject(dc, hpn);
+        HBRUSH hbr = CreateSolidBrush(selected ? CLR_ACCENT : CLR_LIST_BG);
+        HPEN   hpn = CreatePen(PS_SOLID, selected ? 0 : 1, CLR_ACCENT);
+        auto ob = SelectObject(dc, hbr); auto op = SelectObject(dc, hpn);
         RoundRect(dc, rc.left, rc.top, rc.right, rc.bottom, 8, 8);
         SelectObject(dc, ob); SelectObject(dc, op);
         DeleteObject(hbr); DeleteObject(hpn);
@@ -619,28 +635,46 @@ LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
         if (g_hFontBtn) SelectObject(dc, g_hFontBtn);
         wchar_t text[64] = {};
         GetWindowTextW(dis->hwndItem, text, 64);
-        DrawTextW(dc, text, -1, &rc, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        // Language options: left-aligned; thread count options: centered
+        UINT dtFlag = (dis->CtlID >= IDC_SETTINGS_THREADS_1) ? DT_CENTER : DT_LEFT;
+        DrawTextW(dc, text, -1, &rc, dtFlag | DT_VCENTER | DT_SINGLELINE);
         break;
     }
 
     case WM_COMMAND:
     {
         int id = LOWORD(wParam);
+
+        // Language
         AppLang newLang = g_lang;
         if      (id == IDC_SETTINGS_LANG_ZH) newLang = AppLang::Chinese;
         else if (id == IDC_SETTINGS_LANG_EN)  newLang = AppLang::English;
-
         if (newLang != g_lang) {
             g_lang = newLang;
             ApplyLanguage(GetWindow(hWnd, GW_OWNER));
+            break;
+        }
+
+        // Thread count
+        int newT = g_scanThreadCount;
+        if      (id == IDC_SETTINGS_THREADS_1) newT = 1;
+        else if (id == IDC_SETTINGS_THREADS_2) newT = 2;
+        else if (id == IDC_SETTINGS_THREADS_4) newT = 4;
+        else if (id == IDC_SETTINGS_THREADS_8) newT = 8;
+        if (newT != g_scanThreadCount) {
+            g_scanThreadCount = newT;
+            // Redraw all thread buttons to reflect new selection
+            const int kIds[] = { IDC_SETTINGS_THREADS_1, IDC_SETTINGS_THREADS_2,
+                                  IDC_SETTINGS_THREADS_4, IDC_SETTINGS_THREADS_8 };
+            for (int tid : kIds)
+                InvalidateRect(GetDlgItem(hWnd, tid), nullptr, TRUE);
         }
         break;
     }
 
     case WM_CLOSE:   DestroyWindow(hWnd); break;
     case WM_DESTROY:
-        if (hFontTitle)  { DeleteObject(hFontTitle);  hFontTitle  = nullptr; }
-        if (hBrushLabel) { DeleteObject(hBrushLabel); hBrushLabel = nullptr; }
+        if (hFontTitle) { DeleteObject(hFontTitle); hFontTitle = nullptr; }
         g_hSettingsDlg = nullptr;
         break;
 
@@ -662,7 +696,7 @@ static DWORD WINAPI ScanThread(LPVOID param)
         swprintf_s(title, L"扫描中... 已扫描 %d 个文件 | %s",
             total, file.substr(file.find_last_of(L"\\/") + 1).c_str());
         SetWindowTextW(hWnd, title);
-    });
+    }, g_scanThreadCount);
     PostMessageW(hWnd, WM_SCAN_DONE, 0, 0);
     return 0;
 }
@@ -908,7 +942,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             g_hSettingsDlg = CreateWindowW(kSettingsDlgClass,
                 g_lang == AppLang::Chinese ? L"设置中心" : L"Settings",
                 WS_OVERLAPPEDWINDOW & ~WS_MAXIMIZEBOX & ~WS_THICKFRAME,
-                CW_USEDEFAULT, CW_USEDEFAULT, 420, 300,
+                CW_USEDEFAULT, CW_USEDEFAULT, 420, 360,
                 hWnd, nullptr, hInst, nullptr);
             if (g_hSettingsDlg) {
                 ShowWindow(g_hSettingsDlg, SW_SHOW);
