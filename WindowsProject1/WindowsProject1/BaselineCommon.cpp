@@ -1,4 +1,4 @@
-#include "framework.h"
+﻿#include "framework.h"
 #include "BaselineCommon.h"
 #include <lm.h>
 #pragma comment(lib, "netapi32.lib")
