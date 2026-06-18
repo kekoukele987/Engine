@@ -274,7 +274,7 @@ static DWORD WINAPI QuickScanWorker(LPVOID param)
 QuickScanStats QuickScan(ProgressFn onProgress, int threadCount)
 {
     const int numDirs  = (int)(sizeof(kQuickScanDirs) / sizeof(kQuickScanDirs[0]));
-    const int nThreads = std::max(1, std::min(threadCount, numDirs));
+    const int nThreads = (std::max)(1, (std::min)(threadCount, numDirs));
 
 #ifndef _WIN64
     PVOID wow64OldValue = nullptr;

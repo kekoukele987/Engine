@@ -133,6 +133,7 @@
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="BaselineCommon.h" />
     <ClInclude Include="framework.h" />
     <ClInclude Include="MD5Engine.h" />
     <ClInclude Include="Resource.h" />
@@ -143,6 +144,7 @@
     <ClInclude Include="WindowsProject1.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="BaselineCommon.cpp" />
     <ClCompile Include="MD5Engine.cpp" />
     <ClCompile Include="Settings.cpp" />
     <ClCompile Include="sqlite3.c">

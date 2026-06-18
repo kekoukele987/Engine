@@ -784,6 +784,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             SendMessageW(hBtnTrustZone,  WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
             SendMessageW(hBtnSettings,   WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
         }
+        // Apply persisted language so button texts match saved setting on startup
+        ApplyLanguage(hWnd);
         break;
     }
 
