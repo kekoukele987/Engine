@@ -1,8 +1,8 @@
 #include "framework.h"
 #include "TrustZone.h"
-#include <fstream>
 #include <algorithm>
 #include <cwctype>
+#include <cstdio>
 
 TrustZone& TrustZone::Instance()
 {
@@ -22,38 +22,57 @@ std::wstring TrustZone::Normalize(const std::wstring& path) const
 void TrustZone::Load(const std::wstring& dataDir)
 {
     if (m_loaded) return;
-    m_loaded   = true;
-    m_dataPath = dataDir + L"trust.dat";
+    m_loaded = true;
 
-    std::wifstream f(m_dataPath);
-    f.imbue(std::locale(""));
-    std::wstring line;
-    while (std::getline(f, line)) {
-        if (line.empty() || line[0] == L'#') continue;
-        // trim trailing whitespace
-        size_t end = line.find_last_not_of(L" \t\r\n");
+    // Ensure the data directory exists
+    CreateDirectoryW(dataDir.c_str(), nullptr);
+
+    // Resolve to absolute path immediately so Save() is not affected
+    // by any future working-directory changes
+    wchar_t abs[MAX_PATH] = {};
+    GetFullPathNameW((dataDir + L"trust.dat").c_str(), MAX_PATH, abs, nullptr);
+    m_dataPath = abs;
+
+    FILE* f = nullptr;
+    if (_wfopen_s(&f, m_dataPath.c_str(), L"r,ccs=UTF-8") != 0 || !f) return;
+
+    wchar_t line[MAX_PATH + 8] = {};
+    while (fgetws(line, MAX_PATH + 8, f)) {
+        std::wstring s(line);
+        // trim trailing whitespace/newline
+        size_t end = s.find_last_not_of(L" \t\r\n");
         if (end == std::wstring::npos) continue;
-        line = line.substr(0, end + 1);
+        s = s.substr(0, end + 1);
+        // skip empty lines and comments
+        size_t start = s.find_first_not_of(L" \t");
+        if (start == std::wstring::npos || s[start] == L'#') continue;
+        s = s.substr(start);
+        if (s.empty()) continue;
 
-        m_entries.push_back(line);
-        m_normalized.insert(Normalize(line));
+        m_entries.push_back(s);
+        m_normalized.insert(Normalize(s));
     }
+    fclose(f);
 }
 
 void TrustZone::Save() const
 {
     if (m_dataPath.empty()) return;
-    std::wofstream f(m_dataPath);
-    f.imbue(std::locale(""));
-    f << L"# Trust Zone - one file path per line\n";
+
+    FILE* f = nullptr;
+    if (_wfopen_s(&f, m_dataPath.c_str(), L"w,ccs=UTF-8") != 0 || !f) return;
+
+    fwprintf(f, L"# Trust Zone - one file path per line\n");
     for (auto& e : m_entries)
-        f << e << L"\n";
+        fwprintf(f, L"%s\n", e.c_str());
+
+    fclose(f);
 }
 
 bool TrustZone::AddFile(const std::wstring& filePath)
 {
     std::wstring norm = Normalize(filePath);
-    if (m_normalized.count(norm)) return false;   // already trusted
+    if (m_normalized.count(norm)) return false;
 
     m_entries.push_back(filePath);
     m_normalized.insert(norm);

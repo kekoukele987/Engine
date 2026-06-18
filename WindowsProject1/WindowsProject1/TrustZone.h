@@ -2,6 +2,7 @@
 #include <string>
 #include <vector>
 #include <set>
+#include <windows.h>
 
 class TrustZone
 {

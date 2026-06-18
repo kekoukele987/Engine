@@ -126,6 +126,12 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
     </Link>
   </ItemDefinitionGroup>
+  <ItemDefinitionGroup>
+    <PostBuildEvent>
+      <Command>if exist "$(ProjectDir)data" xcopy /E /I /Y "$(ProjectDir)data" "$(OutDir)data" &gt; nul 2&gt;&amp;1</Command>
+      <Message>Copying data directory to output</Message>
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="framework.h" />
     <ClInclude Include="MD5Engine.h" />

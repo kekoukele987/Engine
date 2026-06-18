@@ -15,6 +15,24 @@
 static const wchar_t* kTrustDlgClass = L"TrustZoneDlgClass";
 
 // ---------------------------------------------------------------------------
+// Color palette
+// ---------------------------------------------------------------------------
+#define CLR_BG          RGB( 15,  23,  42)   // dark navy background
+#define CLR_HEADER      RGB( 22,  33,  62)   // slightly lighter header strip
+#define CLR_ACCENT      RGB( 59, 130, 246)   // blue accent line
+#define CLR_TXT_MAIN    RGB(248, 250, 252)   // near-white title
+#define CLR_TXT_SUB     RGB(100, 116, 139)   // muted subtitle
+
+// Button colors  (normal / pressed / disabled)
+#define CLR_BTN_QS      RGB( 34, 197,  94)   // quick scan  - green
+#define CLR_BTN_QS_P    RGB( 21, 128,  61)
+#define CLR_BTN_CS      RGB( 59, 130, 246)   // custom scan - blue
+#define CLR_BTN_CS_P    RGB( 29,  78, 216)
+#define CLR_BTN_TZ      RGB(245, 158,  11)   // trust zone  - amber
+#define CLR_BTN_TZ_P    RGB(180,  83,   9)
+#define CLR_BTN_DIS     RGB( 51,  65,  85)   // disabled - dark slate
+
+// ---------------------------------------------------------------------------
 // Globals
 // ---------------------------------------------------------------------------
 
@@ -27,12 +45,21 @@ HWND hBtnCustomScan = nullptr;
 HWND hBtnTrustZone  = nullptr;
 
 #define BTN_W   160
-#define BTN_H    60
-#define BTN_GAP  20
+#define BTN_H    56
+#define BTN_GAP  24
 
 static HANDLE         g_hScanThread = nullptr;
 static QuickScanStats g_scanStats;
 static HWND           g_hTrustDlg  = nullptr;
+
+static HBRUSH g_hBrushBg = nullptr;
+static HFONT  g_hFontTitle = nullptr;
+static HFONT  g_hFontSub   = nullptr;
+static HFONT  g_hFontBtn   = nullptr;
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 static std::wstring ComputeDataDir()
 {
@@ -46,6 +73,16 @@ static std::wstring ComputeDataDir()
     return L"data\\";
 }
 
+static HFONT MakeFont(int ptSize, bool bold, const wchar_t* face)
+{
+    return CreateFontW(
+        -MulDiv(ptSize, GetDeviceCaps(GetDC(nullptr), LOGPIXELSY), 72),
+        0, 0, 0, bold ? FW_BOLD : FW_NORMAL,
+        FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, face);
+}
+
 // ---------------------------------------------------------------------------
 // Forward declarations
 // ---------------------------------------------------------------------------
@@ -55,7 +92,6 @@ BOOL             InitInstance(HINSTANCE, int);
 LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
 LRESULT CALLBACK TrustZoneDlgProc(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK About(HWND, UINT, WPARAM, LPARAM);
-
 static std::wstring OpenFileDlg(HWND hWnd);
 
 // ---------------------------------------------------------------------------
@@ -93,7 +129,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
 ATOM MyRegisterClass(HINSTANCE hInstance)
 {
-    // Main window
+    g_hBrushBg = CreateSolidBrush(CLR_BG);
+
     WNDCLASSEXW wcex   = {};
     wcex.cbSize        = sizeof(WNDCLASSEX);
     wcex.style         = CS_HREDRAW | CS_VREDRAW;
@@ -101,13 +138,12 @@ ATOM MyRegisterClass(HINSTANCE hInstance)
     wcex.hInstance     = hInstance;
     wcex.hIcon         = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_WINDOWSPROJECT1));
     wcex.hCursor       = LoadCursor(nullptr, IDC_ARROW);
-    wcex.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    wcex.hbrBackground = g_hBrushBg;
     wcex.lpszMenuName  = MAKEINTRESOURCEW(IDC_WINDOWSPROJECT1);
     wcex.lpszClassName = szWindowClass;
     wcex.hIconSm       = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_SMALL));
     ATOM a = RegisterClassExW(&wcex);
 
-    // Trust zone dialog window class
     WNDCLASSEXW td   = {};
     td.cbSize        = sizeof(WNDCLASSEX);
     td.style         = CS_HREDRAW | CS_VREDRAW;
@@ -137,7 +173,7 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 }
 
 // ---------------------------------------------------------------------------
-// File open dialog helper
+// File open dialog
 // ---------------------------------------------------------------------------
 
 static std::wstring OpenFileDlg(HWND hWnd)
@@ -154,7 +190,7 @@ static std::wstring OpenFileDlg(HWND hWnd)
 }
 
 // ---------------------------------------------------------------------------
-// Trust zone dialog procedure
+// Trust zone dialog
 // ---------------------------------------------------------------------------
 
 LRESULT CALLBACK TrustZoneDlgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
@@ -166,7 +202,7 @@ LRESULT CALLBACK TrustZoneDlgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM
     case WM_CREATE:
     {
         RECT rc; GetClientRect(hWnd, &rc);
-        int w = rc.right - rc.left;
+        int w = rc.right  - rc.left;
         int h = rc.bottom - rc.top;
 
         hList = CreateWindowW(L"LISTBOX", nullptr,
@@ -175,31 +211,21 @@ LRESULT CALLBACK TrustZoneDlgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM
             10, 10, w - 20, h - 60,
             hWnd, (HMENU)IDC_TRUST_LIST, hInst, nullptr);
 
-        // Populate from TrustZone
         for (auto& e : TrustZone::Instance().GetEntries())
             SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)e.c_str());
 
-        CreateWindowW(L"BUTTON", L"添加文件",
-            WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-            10, h - 44, 120, 32,
-            hWnd, (HMENU)IDC_BTN_ADD_TRUST, hInst, nullptr);
-
-        CreateWindowW(L"BUTTON", L"移除选中",
-            WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-            140, h - 44, 120, 32,
-            hWnd, (HMENU)IDC_BTN_REMOVE_TRUST, hInst, nullptr);
-
-        CreateWindowW(L"BUTTON", L"关闭",
-            WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-            w - 110, h - 44, 100, 32,
-            hWnd, (HMENU)IDCANCEL, hInst, nullptr);
+        CreateWindowW(L"BUTTON", L"添加文件", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+            10, h - 44, 120, 32, hWnd, (HMENU)IDC_BTN_ADD_TRUST, hInst, nullptr);
+        CreateWindowW(L"BUTTON", L"移除选中", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+            140, h - 44, 120, 32, hWnd, (HMENU)IDC_BTN_REMOVE_TRUST, hInst, nullptr);
+        CreateWindowW(L"BUTTON", L"关闭", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+            w - 110, h - 44, 100, 32, hWnd, (HMENU)IDCANCEL, hInst, nullptr);
         break;
     }
 
     case WM_COMMAND:
     {
         int id = LOWORD(wParam);
-
         if (id == IDC_BTN_ADD_TRUST) {
             std::wstring file = OpenFileDlg(hWnd);
             if (!file.empty()) {
@@ -208,8 +234,7 @@ LRESULT CALLBACK TrustZoneDlgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM
                 else
                     MessageBoxW(hWnd, L"该文件已在信任区中。", L"提示", MB_OK | MB_ICONINFORMATION);
             }
-        }
-        else if (id == IDC_BTN_REMOVE_TRUST) {
+        } else if (id == IDC_BTN_REMOVE_TRUST) {
             int sel = (int)SendMessageW(hList, LB_GETCURSEL, 0, 0);
             if (sel == LB_ERR) {
                 MessageBoxW(hWnd, L"请先选择要移除的文件。", L"提示", MB_OK | MB_ICONINFORMATION);
@@ -219,24 +244,15 @@ LRESULT CALLBACK TrustZoneDlgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM
             SendMessageW(hList, LB_GETTEXT, sel, (LPARAM)path);
             TrustZone::Instance().RemoveFile(path);
             SendMessageW(hList, LB_DELETESTRING, sel, 0);
-        }
-        else if (id == IDCANCEL) {
+        } else if (id == IDCANCEL) {
             DestroyWindow(hWnd);
         }
         break;
     }
 
-    case WM_CLOSE:
-        DestroyWindow(hWnd);
-        break;
-
-    case WM_DESTROY:
-        g_hTrustDlg = nullptr;
-        hList = nullptr;
-        break;
-
-    default:
-        return DefWindowProc(hWnd, message, wParam, lParam);
+    case WM_CLOSE:    DestroyWindow(hWnd); break;
+    case WM_DESTROY:  g_hTrustDlg = nullptr; hList = nullptr; break;
+    default: return DefWindowProc(hWnd, message, wParam, lParam);
     }
     return 0;
 }
@@ -248,20 +264,18 @@ LRESULT CALLBACK TrustZoneDlgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM
 static DWORD WINAPI ScanThread(LPVOID param)
 {
     HWND hWnd = (HWND)param;
-
     g_scanStats = QuickScan([hWnd](const std::wstring& file, int total) {
         wchar_t title[512];
         swprintf_s(title, L"扫描中... 已扫描 %d 个文件 | %s",
             total, file.substr(file.find_last_of(L"\\/") + 1).c_str());
         SetWindowTextW(hWnd, title);
     });
-
     PostMessageW(hWnd, WM_SCAN_DONE, 0, 0);
     return 0;
 }
 
 // ---------------------------------------------------------------------------
-// Custom scan: single-file dialog
+// Custom scan
 // ---------------------------------------------------------------------------
 
 static void DoCustomScan(HWND hWnd)
@@ -270,7 +284,6 @@ static void DoCustomScan(HWND hWnd)
     if (file.empty()) return;
 
     ScanReport r = ScanFile(file);
-
     wchar_t md5W[33] = {};
     MultiByteToWideChar(CP_ACP, 0, r.md5.c_str(), -1, md5W, 33);
 
@@ -288,7 +301,7 @@ static void DoCustomScan(HWND hWnd)
 }
 
 // ---------------------------------------------------------------------------
-// Button layout (3 buttons centered)
+// Button layout
 // ---------------------------------------------------------------------------
 
 static void RepositionButtons(HWND hWnd)
@@ -296,10 +309,10 @@ static void RepositionButtons(HWND hWnd)
     RECT rc;
     GetClientRect(hWnd, &rc);
     int cx     = (rc.right - rc.left) / 2;
-    int cy     = (rc.bottom - rc.top) / 2;
+    int h      = rc.bottom - rc.top;
     int totalW = BTN_W * 3 + BTN_GAP * 2;
     int startX = cx - totalW / 2;
-    int startY = cy - BTN_H / 2;
+    int startY = h * 62 / 100 - BTN_H / 2;   // slightly below center, under title area
     SetWindowPos(hBtnQuickScan,  nullptr, startX,                         startY, BTN_W, BTN_H, SWP_NOZORDER);
     SetWindowPos(hBtnCustomScan, nullptr, startX + (BTN_W + BTN_GAP),     startY, BTN_W, BTN_H, SWP_NOZORDER);
     SetWindowPos(hBtnTrustZone,  nullptr, startX + (BTN_W + BTN_GAP) * 2, startY, BTN_W, BTN_H, SWP_NOZORDER);
@@ -314,22 +327,117 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     switch (message)
     {
     case WM_CREATE:
+    {
+        g_hFontTitle = MakeFont(22, true,  L"Microsoft YaHei");
+        g_hFontSub   = MakeFont(10, false, L"Microsoft YaHei");
+        g_hFontBtn   = MakeFont(11, false, L"Microsoft YaHei");
+
         hBtnQuickScan = CreateWindowW(L"BUTTON", L"快速扫描",
-            WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+            WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
             0, 0, BTN_W, BTN_H, hWnd, (HMENU)IDC_BTN_QUICK_SCAN, hInst, nullptr);
 
         hBtnCustomScan = CreateWindowW(L"BUTTON", L"自定义扫描",
-            WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+            WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
             0, 0, BTN_W, BTN_H, hWnd, (HMENU)IDC_BTN_CUSTOM_SCAN, hInst, nullptr);
 
         hBtnTrustZone = CreateWindowW(L"BUTTON", L"信任区管理",
-            WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+            WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
             0, 0, BTN_W, BTN_H, hWnd, (HMENU)IDC_BTN_TRUST_ZONE, hInst, nullptr);
+
+        if (g_hFontBtn) {
+            SendMessageW(hBtnQuickScan,  WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
+            SendMessageW(hBtnCustomScan, WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
+            SendMessageW(hBtnTrustZone,  WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
+        }
         break;
+    }
 
     case WM_SIZE:
         RepositionButtons(hWnd);
         break;
+
+    case WM_ERASEBKGND:
+    {
+        HDC hdc = (HDC)wParam;
+        RECT rc; GetClientRect(hWnd, &rc);
+        // Main background
+        FillRect(hdc, &rc, g_hBrushBg);
+        // Lighter header strip at the top
+        RECT rcHeader = { rc.left, rc.top, rc.right, rc.top + 200 };
+        HBRUSH hbHeader = CreateSolidBrush(CLR_HEADER);
+        FillRect(hdc, &rcHeader, hbHeader);
+        DeleteObject(hbHeader);
+        // Blue accent line at bottom of header
+        RECT rcLine = { rc.left, rc.top + 200, rc.right, rc.top + 203 };
+        HBRUSH hbLine = CreateSolidBrush(CLR_ACCENT);
+        FillRect(hdc, &rcLine, hbLine);
+        DeleteObject(hbLine);
+        return 1;
+    }
+
+    case WM_PAINT:
+    {
+        PAINTSTRUCT ps;
+        HDC hdc = BeginPaint(hWnd, &ps);
+        RECT rc; GetClientRect(hWnd, &rc);
+
+        SetBkMode(hdc, TRANSPARENT);
+
+        // Title
+        if (g_hFontTitle) SelectObject(hdc, g_hFontTitle);
+        SetTextColor(hdc, CLR_TXT_MAIN);
+        RECT rcTitle = { 0, 60, rc.right, 110 };
+        DrawTextW(hdc, L"Engine  杀毒引擎", -1, &rcTitle, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+
+        // Subtitle
+        if (g_hFontSub) SelectObject(hdc, g_hFontSub);
+        SetTextColor(hdc, CLR_TXT_SUB);
+        RECT rcSub = { 0, 118, rc.right, 145 };
+        DrawTextW(hdc, L"MD5 特征码引擎  |  实时防护已就绪", -1, &rcSub, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+
+        EndPaint(hWnd, &ps);
+        break;
+    }
+
+    case WM_DRAWITEM:
+    {
+        auto* dis = reinterpret_cast<LPDRAWITEMSTRUCT>(lParam);
+        if (dis->CtlType != ODT_BUTTON) break;
+
+        bool pressed  = (dis->itemState & ODS_SELECTED) != 0;
+        bool disabled = (dis->itemState & ODS_DISABLED)  != 0;
+
+        COLORREF clrN, clrP;
+        switch (dis->CtlID) {
+        case IDC_BTN_QUICK_SCAN:  clrN = CLR_BTN_QS; clrP = CLR_BTN_QS_P; break;
+        case IDC_BTN_CUSTOM_SCAN: clrN = CLR_BTN_CS; clrP = CLR_BTN_CS_P; break;
+        default:                  clrN = CLR_BTN_TZ; clrP = CLR_BTN_TZ_P; break;
+        }
+        COLORREF fill = disabled ? CLR_BTN_DIS : (pressed ? clrP : clrN);
+
+        // Rounded rectangle fill
+        HDC dc = dis->hDC;
+        RECT rc = dis->rcItem;
+        HBRUSH hbr = CreateSolidBrush(fill);
+        HPEN   hpn = CreatePen(PS_SOLID, 0, fill);
+        auto   ob  = SelectObject(dc, hbr);
+        auto   op  = SelectObject(dc, hpn);
+        RoundRect(dc, rc.left, rc.top, rc.right, rc.bottom, 10, 10);
+        SelectObject(dc, ob);
+        SelectObject(dc, op);
+        DeleteObject(hbr);
+        DeleteObject(hpn);
+
+        // Text (shift 1px down when pressed)
+        if (pressed) OffsetRect(&rc, 0, 1);
+        SetBkMode(dc, TRANSPARENT);
+        SetTextColor(dc, RGB(255, 255, 255));
+        if (g_hFontBtn) SelectObject(dc, g_hFontBtn);
+        wchar_t text[64] = {};
+        GetWindowTextW(dis->hwndItem, text, 64);
+        DrawTextW(dc, text, -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        break;
+    }
 
     case WM_SCAN_DONE:
     {
@@ -339,8 +447,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         EnableWindow(hBtnTrustZone,  TRUE);
         if (g_hScanThread) { CloseHandle(g_hScanThread); g_hScanThread = nullptr; }
 
-        auto& r   = g_scanStats;
-        int   total = r.black + r.white + r.unknown + r.errors;
+        auto& r = g_scanStats;
+        int total = r.black + r.white + r.unknown + r.errors;
 
         wchar_t msg[2048];
         swprintf_s(msg,
@@ -383,7 +491,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
         case IDC_BTN_TRUST_ZONE:
             if (g_hTrustDlg) { SetForegroundWindow(g_hTrustDlg); break; }
-            // Load trust zone data before opening dialog
             TrustZone::Instance().Load(ComputeDataDir());
             g_hTrustDlg = CreateWindowW(kTrustDlgClass, L"信任区管理",
                 WS_OVERLAPPEDWINDOW & ~WS_MAXIMIZEBOX & ~WS_THICKFRAME,
@@ -409,15 +516,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         break;
     }
 
-    case WM_PAINT:
-    {
-        PAINTSTRUCT ps;
-        BeginPaint(hWnd, &ps);
-        EndPaint(hWnd, &ps);
-        break;
-    }
-
     case WM_DESTROY:
+        if (g_hFontTitle) { DeleteObject(g_hFontTitle); g_hFontTitle = nullptr; }
+        if (g_hFontSub)   { DeleteObject(g_hFontSub);   g_hFontSub   = nullptr; }
+        if (g_hFontBtn)   { DeleteObject(g_hFontBtn);   g_hFontBtn   = nullptr; }
+        if (g_hBrushBg)   { DeleteObject(g_hBrushBg);   g_hBrushBg   = nullptr; }
         PostQuitMessage(0);
         break;
 
@@ -436,8 +539,7 @@ INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
     UNREFERENCED_PARAMETER(lParam);
     switch (message)
     {
-    case WM_INITDIALOG:
-        return (INT_PTR)TRUE;
+    case WM_INITDIALOG: return (INT_PTR)TRUE;
     case WM_COMMAND:
         if (LOWORD(wParam) == IDOK || LOWORD(wParam) == IDCANCEL) {
             EndDialog(hDlg, LOWORD(wParam));
