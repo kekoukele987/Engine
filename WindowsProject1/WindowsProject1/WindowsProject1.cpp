@@ -632,7 +632,7 @@ LRESULT CALLBACK SettingsDlgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
 
         if (newLang != g_lang) {
             g_lang = newLang;
-            ApplyLanguage(GetParent(hWnd));
+            ApplyLanguage(GetWindow(hWnd, GW_OWNER));
         }
         break;
     }
