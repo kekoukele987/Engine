@@ -135,6 +135,7 @@
   <ItemGroup>
     <ClInclude Include="BaselineCommon.h" />
     <ClInclude Include="framework.h" />
+    <ClInclude Include="HeuristicEngine.h" />
     <ClInclude Include="MD5Engine.h" />
     <ClInclude Include="Resource.h" />
     <ClInclude Include="Settings.h" />
@@ -145,6 +146,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="BaselineCommon.cpp" />
+    <ClCompile Include="HeuristicEngine.cpp" />
     <ClCompile Include="MD5Engine.cpp" />
     <ClCompile Include="Settings.cpp" />
     <ClCompile Include="sqlite3.c">

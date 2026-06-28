@@ -123,7 +123,7 @@ bool EnumLocalUsers(std::vector<UserInfo>& outUsers, std::wstring& errMsg)
     PUSER_INFO_20  pInfo       = nullptr;
     DWORD          read        = 0;
     DWORD          total       = 0;
-    DWORD_PTR      resume      = 0;
+    DWORD          resume      = 0;
     NET_API_STATUS status;
 
     do {

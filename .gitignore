@@ -44,3 +44,4 @@ Release/
 *.sdf
 *.opensdf
 ipch/
+.aider*
