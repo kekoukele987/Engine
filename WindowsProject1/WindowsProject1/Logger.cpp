@@ -5,6 +5,7 @@
 #include <ctime>
 #include <io.h>
 #include <fcntl.h>
+#include <vector>
 
 // ---------------------------------------------------------------------------
 // 单例实现
@@ -215,12 +216,19 @@ void Logger::WriteToFile(const std::wstring& logLine)
     try {
         std::wstring filePath = GetLogFilePath();
         
-        // 以追加模式打开文件
-        std::wofstream outFile(filePath, std::ios::out | std::ios::app);
-        
-        if (outFile.is_open()) {
-            outFile << logLine;
-            outFile.close();
+        // 将宽字符串转换为UTF-8编码
+        int size = WideCharToMultiByte(CP_UTF8, 0, logLine.c_str(), -1, nullptr, 0, nullptr, nullptr);
+        if (size > 0) {
+            std::vector<char> buffer(size);
+            WideCharToMultiByte(CP_UTF8, 0, logLine.c_str(), -1, buffer.data(), size, nullptr, nullptr);
+            
+            // 以追加模式打开文件（使用普通ofstream写入UTF-8）
+            std::ofstream outFile(filePath, std::ios::out | std::ios::app | std::ios::binary);
+            
+            if (outFile.is_open()) {
+                outFile.write(buffer.data(), size - 1);  // size-1 去掉末尾的空字符
+                outFile.close();
+            }
         }
     }
     catch (...) {
