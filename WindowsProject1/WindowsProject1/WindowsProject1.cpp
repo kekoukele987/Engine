@@ -5,6 +5,7 @@
 #include "MD5Engine.h"
 #include "TrustZone.h"
 #include "Settings.h"
+#include "Logger.h"
 #include <commdlg.h>
 #include <shlobj.h>
 #include <string>
@@ -145,6 +146,14 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     UNREFERENCED_PARAMETER(lpCmdLine);
 
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+    
+    // 初始化日志系统
+    if (Logger::Instance().Initialize(L"./log")) {
+        Logger::Instance().Info(L"杀毒引擎启动");
+    } else {
+        // 日志系统初始化失败，但不影响主程序运行
+    }
+    
     Settings::Instance().Load(ComputeDataDir());
 
     LoadStringW(hInstance, IDS_APP_TITLE,        szTitle,       MAX_LOADSTRING);
@@ -915,6 +924,19 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                     wcscat_s(msg, (f + L"\n").c_str());
         }
 
+        // 记录扫描完成日志
+        wchar_t logMsg[512];
+        swprintf_s(logMsg, L"快速扫描完成 - 总计:%d, 威胁:%d, 安全:%d, 未知:%d, 错误:%d, 启发式检出:%d", 
+                   total, r.black, r.white, r.unknown, r.errors, r.heuristicHits);
+        Logger::Instance().Info(logMsg);
+
+        // 如果检测到威胁，记录MYERROR级别日志
+        if (r.black > 0) {
+            for (const auto& f : r.blackFiles) {
+                Logger::Instance().Error(L"检测到威胁文件: " + f);
+            }
+        }
+
         UINT icon = r.black > 0 ? MB_ICONERROR : MB_ICONINFORMATION;
         MessageBoxW(hWnd, msg, L"快速扫描结果", MB_OK | icon);
         break;
@@ -930,6 +952,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             EnableWindow(hBtnQuickScan,  FALSE);
             EnableWindow(hBtnCustomScan, FALSE);
             EnableWindow(hBtnTrustZone,  FALSE);
+            Logger::Instance().Info(L"开始快速扫描");
             g_hScanThread = CreateThread(nullptr, 0, ScanThread, hWnd, 0, nullptr);
             break;
 

@@ -2,6 +2,7 @@
 #include "MD5Engine.h"
 #include "HeuristicEngine.h"
 #include "TrustZone.h"
+#include "Logger.h"
 #include <wincrypt.h>
 #include <fstream>
 #include <set>
@@ -72,6 +73,11 @@ static std::set<std::string> LoadList(const std::wstring& path)
         std::transform(line.begin(), line.end(), line.begin(), ::tolower);
         if (line.size() == 32) s.insert(line);
     }
+    
+    wchar_t logMsg[512];
+    swprintf_s(logMsg, L"加载特征库: %s, 包含 %d 个MD5条目", path.c_str(), (int)s.size());
+    Logger::Instance().Debug(logMsg);
+    
     return s;
 }
 

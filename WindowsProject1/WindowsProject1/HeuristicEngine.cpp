@@ -1,5 +1,6 @@
 #include "framework.h"
 #include "HeuristicEngine.h"
+#include "Logger.h"
 
 // ---------------------------------------------------------------------------
 // 单例
@@ -77,5 +78,13 @@ bool HeuristicEngine::DetectPattern(const std::wstring& filePath, bool& error)
     }
 
     CloseHandle(hFile);
+    
+    // 记录启发式检测结果
+    if (found) {
+        wchar_t logMsg[512];
+        swprintf_s(logMsg, L"启发式引擎检测到威胁特征: %s", filePath.c_str());
+        Logger::Instance().Warn(logMsg);
+    }
+    
     return found;
 }
