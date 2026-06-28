@@ -79,7 +79,7 @@ void Logger::Log(LogLevel level, const std::wstring& message)
     logLine += LevelToString(level);
     logLine += L" ";
     logLine += message;
-    logLine += L"\n";
+    logLine += L"\r\n";  // 使用Windows换行符
 
     // 写入文件
     WriteToFile(logLine);

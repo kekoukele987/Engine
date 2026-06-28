@@ -28,6 +28,49 @@
 #define IDC_SETTINGS_THREADS_2  1023
 #define IDC_SETTINGS_THREADS_4  1024
 #define IDC_SETTINGS_THREADS_8  1025
+#define IDC_BTN_SCAN_HISTORY    1026
+#define IDC_SCAN_HISTORY_LIST   1027
+#define IDC_BTN_VIEW_DETAILS    1028
+#define IDC_BTN_DELETE_RECORD   1029
+#define IDC_BTN_CLEAR_ALL       1030
+#define IDC_STATUS              1031
+
+// 历史记录对话框
+#define IDD_HISTORY_DIALOG      2000
+
+// 历史记录字符串
+#define IDS_HISTORY_TITLE       3001
+#define IDS_VIEW_DETAILS        3002
+#define IDS_DELETE_RECORD       3003
+#define IDS_CLEAR_ALL           3004
+#define IDS_CLOSE               3005
+#define IDS_COL_ID              3006
+#define IDS_COL_TIME            3007
+#define IDS_COL_TYPE            3008
+#define IDS_COL_TOTAL           3009
+#define IDS_COL_THREATS         3010
+#define IDS_COL_SAFE            3011
+#define IDS_NO_HISTORY          3012
+#define IDS_TOTAL_RECORDS       3013
+#define IDS_SELECT_RECORD       3014
+#define IDS_CONFIRM_DELETE      3015
+#define IDS_CONFIRM             3016
+#define IDS_DELETE_SUCCESS      3017
+#define IDS_DELETE_FAILED       3018
+#define IDS_CONFIRM_CLEAR       3019
+#define IDS_CLEAR_SUCCESS       3020
+#define IDS_RECORD_DETAILS      3021
+#define IDS_DETAILS_TIME        3022
+#define IDS_DETAILS_TYPE        3023
+#define IDS_DETAILS_TOTAL       3024
+#define IDS_DETAILS_THREATS     3025
+#define IDS_DETAILS_SAFE        3026
+#define IDS_DETAILS_UNKNOWN     3027
+#define IDS_DETAILS_ERROR       3028
+#define IDS_DETAILS_HEURISTIC   3029
+#define IDS_DETAILS_THREAT_FILES 3030
+#define IDS_INFO                3031
+#define IDS_ERROR               3032
 #ifndef IDC_STATIC
 #define IDC_STATIC				-1
 #endif

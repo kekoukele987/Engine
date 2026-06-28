@@ -3,9 +3,11 @@
 #include "framework.h"
 #include "WindowsProject1.h"
 #include "MD5Engine.h"
+#include "HistoryDialog.h"
 #include "TrustZone.h"
 #include "Settings.h"
 #include "Logger.h"
+#include "ScanHistory.h"
 #include <commdlg.h>
 #include <shlobj.h>
 #include <string>
@@ -30,6 +32,7 @@ struct LangStrings {
     const wchar_t* quickScan;
     const wchar_t* customScan;
     const wchar_t* trustZone;
+    const wchar_t* scanHistory;
     const wchar_t* settings;
 };
 
@@ -37,12 +40,12 @@ static const LangStrings kLang[] = {
     {
         L"Engine  杀毒引擎",
         L"MD5 特征码引擎  |  启发式引擎  |  实时防护已就绪",
-        L"快速扫描", L"自定义扫描", L"信任区管理", L"设置中心"
+        L"快速扫描", L"自定义扫描", L"信任区管理", L"扫描历史", L"设置中心"
     },
     {
         L"Engine  Antivirus",
         L"MD5 Signature Engine  |  Heuristic Engine  |  Real-time Protection Ready",
-        L"Quick Scan", L"Custom Scan", L"Trust Zone", L"Settings"
+        L"Quick Scan", L"Custom Scan", L"Trust Zone", L"Scan History", L"Settings"
     },
 };
 static const LangStrings& Str() { return kLang[(int)Settings::Instance().GetLang()]; }
@@ -78,7 +81,10 @@ WCHAR     szWindowClass[MAX_LOADSTRING];
 HWND hBtnQuickScan     = nullptr;
 HWND hBtnCustomScan    = nullptr;
 HWND hBtnTrustZone     = nullptr;
+HWND hBtnScanHistory   = nullptr;
 HWND hBtnSettings      = nullptr;
+
+static HWND g_hHistoryDlg = nullptr;
 
 #define BTN_W   150
 #define BTN_H    56
@@ -118,6 +124,19 @@ static HFONT MakeFont(int ptSize, bool bold, const wchar_t* face)
         FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
         CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, face);
+}
+
+static std::wstring GetCurrentTimeStr()
+{
+    time_t now = time(nullptr);
+    struct tm timeinfo;
+    localtime_s(&timeinfo, &now);
+    
+    wchar_t buf[64];
+    swprintf_s(buf, L"%04d-%02d-%02d %02d:%02d:%02d",
+        timeinfo.tm_year + 1900, timeinfo.tm_mon + 1, timeinfo.tm_mday,
+        timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+    return buf;
 }
 
 // ---------------------------------------------------------------------------
@@ -506,6 +525,7 @@ static void ApplyLanguage(HWND hMainWnd)
     SetWindowTextW(hBtnQuickScan, Str().quickScan);
     SetWindowTextW(hBtnCustomScan,Str().customScan);
     SetWindowTextW(hBtnTrustZone, Str().trustZone);
+    if (hBtnScanHistory) SetWindowTextW(hBtnScanHistory, Str().scanHistory);
     if (hBtnSettings) SetWindowTextW(hBtnSettings, Str().settings);
     InvalidateRect(hMainWnd, nullptr, TRUE);
     // Settings dialog: repaint header title + option buttons
@@ -756,13 +776,17 @@ static void RepositionButtons(HWND hWnd)
     GetClientRect(hWnd, &rc);
     int cx     = (rc.right - rc.left) / 2;
     int h      = rc.bottom - rc.top;
-    int totalW = BTN_W * 4 + BTN_GAP * 3;
+    
+    // 现在有5个按钮，重新计算总宽度
+    int totalW = BTN_W * 5 + BTN_GAP * 4;
     int startX = cx - totalW / 2;
     int startY = h * 62 / 100 - BTN_H / 2;
+    
     SetWindowPos(hBtnQuickScan,     nullptr, startX,                         startY, BTN_W, BTN_H, SWP_NOZORDER);
     SetWindowPos(hBtnCustomScan,    nullptr, startX + (BTN_W + BTN_GAP),     startY, BTN_W, BTN_H, SWP_NOZORDER);
     SetWindowPos(hBtnTrustZone,     nullptr, startX + (BTN_W + BTN_GAP) * 2, startY, BTN_W, BTN_H, SWP_NOZORDER);
-    SetWindowPos(hBtnSettings,      nullptr, startX + (BTN_W + BTN_GAP) * 3, startY, BTN_W, BTN_H, SWP_NOZORDER);
+    SetWindowPos(hBtnScanHistory,   nullptr, startX + (BTN_W + BTN_GAP) * 3, startY, BTN_W, BTN_H, SWP_NOZORDER);
+    SetWindowPos(hBtnSettings,      nullptr, startX + (BTN_W + BTN_GAP) * 4, startY, BTN_W, BTN_H, SWP_NOZORDER);
 }
 
 // ---------------------------------------------------------------------------
@@ -791,6 +815,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
             0, 0, BTN_W, BTN_H, hWnd, (HMENU)IDC_BTN_TRUST_ZONE, hInst, nullptr);
 
+        hBtnScanHistory = CreateWindowW(L"BUTTON", L"扫描历史",
+            WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+            0, 0, BTN_W, BTN_H, hWnd, (HMENU)IDC_BTN_SCAN_HISTORY, hInst, nullptr);
+
         hBtnSettings = CreateWindowW(L"BUTTON", L"设置中心",
             WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
             0, 0, BTN_W, BTN_H, hWnd, (HMENU)IDC_BTN_SETTINGS, hInst, nullptr);
@@ -799,6 +827,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             SendMessageW(hBtnQuickScan,     WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
             SendMessageW(hBtnCustomScan,    WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
             SendMessageW(hBtnTrustZone,     WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
+            SendMessageW(hBtnScanHistory,   WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
             SendMessageW(hBtnSettings,      WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
         }
         // Apply persisted language so button texts match saved setting on startup
@@ -863,11 +892,12 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
         COLORREF clrN, clrP;
         switch (dis->CtlID) {
-        case IDC_BTN_QUICK_SCAN:  clrN = CLR_BTN_QS; clrP = CLR_BTN_QS_P; break;
-        case IDC_BTN_CUSTOM_SCAN: clrN = CLR_BTN_CS; clrP = CLR_BTN_CS_P; break;
-        case IDC_BTN_TRUST_ZONE:  clrN = CLR_BTN_TZ; clrP = CLR_BTN_TZ_P; break;
-        case IDC_BTN_SETTINGS:    clrN = CLR_BTN_ST; clrP = CLR_BTN_ST_P; break;
-        default:                  clrN = CLR_BTN_DIS; clrP = CLR_BTN_DIS;  break;
+        case IDC_BTN_QUICK_SCAN:   clrN = CLR_BTN_QS; clrP = CLR_BTN_QS_P; break;
+        case IDC_BTN_CUSTOM_SCAN:  clrN = CLR_BTN_CS; clrP = CLR_BTN_CS_P; break;
+        case IDC_BTN_TRUST_ZONE:   clrN = CLR_BTN_TZ; clrP = CLR_BTN_TZ_P; break;
+        case IDC_BTN_SCAN_HISTORY: clrN = CLR_BTN_ST; clrP = CLR_BTN_ST_P; break;
+        case IDC_BTN_SETTINGS:     clrN = CLR_BTN_ST; clrP = CLR_BTN_ST_P; break;
+        default:                   clrN = CLR_BTN_DIS; clrP = CLR_BTN_DIS;  break;
         }
         COLORREF fill = disabled ? CLR_BTN_DIS : (pressed ? clrP : clrN);
 
@@ -937,6 +967,22 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             }
         }
 
+        // 保存扫描记录到历史
+        ScanRecord record;
+        record.id = 0;
+        record.scanTime = GetCurrentTimeStr();
+        record.scanType = L"快速扫描";
+        record.totalFiles = total;
+        record.blackFiles = r.black;
+        record.whiteFiles = r.white;
+        record.unknownFiles = r.unknown;
+        record.errorFiles = r.errors;
+        record.heuristicHits = r.heuristicHits;
+        record.threatList = r.blackFiles;
+        
+        ScanHistory::Instance().Initialize(ComputeDataDir());
+        ScanHistory::Instance().AddRecord(record);
+
         UINT icon = r.black > 0 ? MB_ICONERROR : MB_ICONINFORMATION;
         MessageBoxW(hWnd, msg, L"快速扫描结果", MB_OK | icon);
         break;
@@ -971,6 +1017,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 ShowWindow(g_hTrustDlg, SW_SHOW);
                 SetForegroundWindow(g_hTrustDlg);
             }
+            break;
+
+        case IDC_BTN_SCAN_HISTORY:
+            HistoryDialog::Show(hWnd);
             break;
 
         case IDC_BTN_SETTINGS:

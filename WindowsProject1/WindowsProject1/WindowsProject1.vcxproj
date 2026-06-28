@@ -140,9 +140,11 @@
     <ClInclude Include="BaselineCommon.h" />
     <ClInclude Include="framework.h" />
     <ClInclude Include="HeuristicEngine.h" />
+    <ClInclude Include="HistoryDialog.h" />
     <ClInclude Include="Logger.h" />
     <ClInclude Include="MD5Engine.h" />
     <ClInclude Include="Resource.h" />
+    <ClInclude Include="ScanHistory.h" />
     <ClInclude Include="Settings.h" />
     <ClInclude Include="sqlite3.h" />
     <ClInclude Include="targetver.h" />
@@ -152,8 +154,10 @@
   <ItemGroup>
     <ClCompile Include="BaselineCommon.cpp" />
     <ClCompile Include="HeuristicEngine.cpp" />
+    <ClCompile Include="HistoryDialog.cpp" />
     <ClCompile Include="Logger.cpp" />
     <ClCompile Include="MD5Engine.cpp" />
+    <ClCompile Include="ScanHistory.cpp" />
     <ClCompile Include="Settings.cpp" />
     <ClCompile Include="sqlite3.c">
       <CompileAs>CompileAsC</CompileAs>
