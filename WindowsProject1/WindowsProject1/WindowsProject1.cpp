@@ -11,6 +11,7 @@
 #include <commdlg.h>
 #include <shlobj.h>
 #include <string>
+#include <vector>
 
 #pragma comment(lib, "Comdlg32.lib")
 #pragma comment(lib, "shell32.lib")
@@ -749,12 +750,25 @@ static void DoCustomScan(HWND hWnd)
     wchar_t md5W[33] = {};
     MultiByteToWideChar(CP_ACP, 0, r.md5.c_str(), -1, md5W, 33);
 
+    // 记录扫描日志
+    wchar_t logMsg[512];
+    swprintf_s(logMsg, L"自定义扫描: %s, MD5: %s", file.c_str(), md5W);
+    Logger::Instance().Info(logMsg);
+
     wchar_t msg[1024];
+    int threatCount = 0;
+    std::vector<std::wstring> threatList;
+    
     if (r.result == ScanResult::Black) {
+        threatCount = 1;
+        threatList.push_back(file);
+        
         if (r.heuristicHit) {
             swprintf_s(msg, L"发现威胁！\n\n文件：%s\nMD5 ：%s\n\n状态：启发式引擎检测到威胁特征（A5 77 B0）", file.c_str(), md5W);
+            Logger::Instance().Error(L"自定义扫描检测到威胁(启发式): " + file);
         } else {
             swprintf_s(msg, L"发现威胁！\n\n文件：%s\nMD5 ：%s\n\n状态：黑名单病毒文件", file.c_str(), md5W);
+            Logger::Instance().Error(L"自定义扫描检测到威胁(黑名单): " + file);
         }
         MessageBoxW(hWnd, msg, L"自定义扫描", MB_OK | MB_ICONERROR);
     } else if (r.result == ScanResult::White) {
@@ -764,6 +778,22 @@ static void DoCustomScan(HWND hWnd)
         swprintf_s(msg, L"未知文件\n\n文件：%s\nMD5 ：%s\n\n状态：不在数据库中", file.c_str(), md5W);
         MessageBoxW(hWnd, msg, L"自定义扫描", MB_OK | MB_ICONWARNING);
     }
+    
+    // 保存自定义扫描记录到历史
+    ScanRecord record;
+    record.id = 0;
+    record.scanTime = GetCurrentTimeStr();
+    record.scanType = L"自定义扫描";
+    record.totalFiles = 1;  // 自定义扫描总是扫描1个文件
+    record.blackFiles = threatCount;
+    record.whiteFiles = (r.result == ScanResult::White) ? 1 : 0;
+    record.unknownFiles = (r.result == ScanResult::Unknown) ? 1 : 0;
+    record.errorFiles = 0;
+    record.heuristicHits = (r.heuristicHit) ? 1 : 0;
+    record.threatList = threatList;
+    
+    ScanHistory::Instance().Initialize(ComputeDataDir());
+    ScanHistory::Instance().AddRecord(record);
 }
 
 // ---------------------------------------------------------------------------
