@@ -1,5 +1,6 @@
 #include "framework.h"
 #include "MD5Engine.h"
+#include "HeuristicEngine.h"
 #include "TrustZone.h"
 #include <wincrypt.h>
 #include <fstream>
@@ -124,6 +125,18 @@ ScanReport ScanFile(const std::wstring& filePath)
 
     if (black.count(r.md5))      r.result = ScanResult::Black;
     else if (white.count(r.md5)) r.result = ScanResult::White;
+    else {
+        // MD5 未知：运行启发式检测（扫描 A5 77 B0 特征码）
+        bool heurError = false;
+        if (HeuristicEngine::Instance().DetectPattern(filePath, heurError)) {
+            r.result = ScanResult::Black;
+            r.heuristicHit = true;
+        } else if (heurError) {
+            r.result = ScanResult::Unknown;  // 读取失败，保持未知
+        } else {
+            r.result = ScanResult::Unknown;  // 启发式未命中，仍为未知
+        }
+    }
     return r;
 }
 
@@ -238,7 +251,15 @@ static void ScanDirectory(
         } else if (white.count(md5)) {
             ++stats.white;
         } else {
-            ++stats.unknown;
+            // MD5 未知：运行启发式检测（扫描 A5 77 B0 特征码）
+            bool heurError = false;
+            if (HeuristicEngine::Instance().DetectPattern(filePath, heurError)) {
+                ++stats.black;
+                ++stats.heuristicHits;
+                stats.blackFiles.push_back(filePath);
+            } else {
+                ++stats.unknown;
+            }
         }
 
     } while (FindNextFileW(hFind, &fd));
@@ -322,10 +343,11 @@ QuickScanStats QuickScan(ProgressFn onProgress, int threadCount)
     // Merge per-thread stats
     QuickScanStats result;
     for (auto& w : workers) {
-        result.black   += w.stats.black;
-        result.white   += w.stats.white;
-        result.unknown += w.stats.unknown;
-        result.errors  += w.stats.errors;
+        result.black         += w.stats.black;
+        result.white         += w.stats.white;
+        result.unknown       += w.stats.unknown;
+        result.errors        += w.stats.errors;
+        result.heuristicHits += w.stats.heuristicHits;
         result.blackFiles.insert(result.blackFiles.end(),
                                  w.stats.blackFiles.begin(),
                                  w.stats.blackFiles.end());

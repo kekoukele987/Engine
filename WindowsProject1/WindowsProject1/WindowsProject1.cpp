@@ -3,7 +3,6 @@
 #include "framework.h"
 #include "WindowsProject1.h"
 #include "MD5Engine.h"
-#include "HeuristicEngine.h"
 #include "TrustZone.h"
 #include "Settings.h"
 #include <commdlg.h>
@@ -16,7 +15,6 @@
 
 #define MAX_LOADSTRING  100
 #define WM_SCAN_DONE   (WM_APP + 1)
-#define WM_HEURISTIC_SCAN_DONE   (WM_APP + 2)
 
 static const wchar_t* kTrustDlgClass    = L"TrustZoneDlgClass";
 static const wchar_t* kSettingsDlgClass = L"SettingsDlgClass";
@@ -32,19 +30,18 @@ struct LangStrings {
     const wchar_t* customScan;
     const wchar_t* trustZone;
     const wchar_t* settings;
-    const wchar_t* heuristicScan;
 };
 
 static const LangStrings kLang[] = {
     {
         L"Engine  杀毒引擎",
         L"MD5 特征码引擎  |  启发式引擎  |  实时防护已就绪",
-        L"快速扫描", L"自定义扫描", L"信任区管理", L"设置中心", L"启发式扫描"
+        L"快速扫描", L"自定义扫描", L"信任区管理", L"设置中心"
     },
     {
         L"Engine  Antivirus",
         L"MD5 Signature Engine  |  Heuristic Engine  |  Real-time Protection Ready",
-        L"Quick Scan", L"Custom Scan", L"Trust Zone", L"Settings", L"Heuristic Scan"
+        L"Quick Scan", L"Custom Scan", L"Trust Zone", L"Settings"
     },
 };
 static const LangStrings& Str() { return kLang[(int)Settings::Instance().GetLang()]; }
@@ -67,8 +64,6 @@ static const LangStrings& Str() { return kLang[(int)Settings::Instance().GetLang
 #define CLR_BTN_TZ_P    RGB(180,  83,   9)
 #define CLR_BTN_ST      RGB(139,  92, 246)   // settings    - purple
 #define CLR_BTN_ST_P    RGB(109,  40, 217)
-#define CLR_BTN_HS      RGB( 20, 184, 166)   // heuristic scan - teal
-#define CLR_BTN_HS_P    RGB( 15, 118, 110)
 #define CLR_BTN_DIS     RGB( 51,  65,  85)   // disabled - dark slate
 
 // ---------------------------------------------------------------------------
@@ -83,7 +78,6 @@ HWND hBtnQuickScan     = nullptr;
 HWND hBtnCustomScan    = nullptr;
 HWND hBtnTrustZone     = nullptr;
 HWND hBtnSettings      = nullptr;
-HWND hBtnHeuristicScan = nullptr;
 
 #define BTN_W   150
 #define BTN_H    56
@@ -91,8 +85,6 @@ HWND hBtnHeuristicScan = nullptr;
 
 static HANDLE              g_hScanThread          = nullptr;
 static QuickScanStats      g_scanStats;
-static HANDLE              g_hHeuristicScanThread = nullptr;
-static HeuristicScanStats  g_heuristicScanStats;
 static HWND           g_hTrustDlg    = nullptr;
 static HWND           g_hSettingsDlg = nullptr;
 
@@ -506,7 +498,6 @@ static void ApplyLanguage(HWND hMainWnd)
     SetWindowTextW(hBtnCustomScan,Str().customScan);
     SetWindowTextW(hBtnTrustZone, Str().trustZone);
     if (hBtnSettings) SetWindowTextW(hBtnSettings, Str().settings);
-    if (hBtnHeuristicScan) SetWindowTextW(hBtnHeuristicScan, Str().heuristicScan);
     InvalidateRect(hMainWnd, nullptr, TRUE);
     // Settings dialog: repaint header title + option buttons
     if (g_hSettingsDlg) {
@@ -716,20 +707,6 @@ static DWORD WINAPI ScanThread(LPVOID param)
 // Heuristic scan background thread
 // ---------------------------------------------------------------------------
 
-static DWORD WINAPI HeuristicScanThread(LPVOID param)
-{
-    HWND hWnd = (HWND)param;
-    g_heuristicScanStats = HeuristicEngine::Instance().QuickScan(
-        [hWnd](const std::wstring& file, int total) {
-            wchar_t title[512];
-            swprintf_s(title, L"启发式扫描中... 已扫描 %d 个文件 | %s",
-                total, file.substr(file.find_last_of(L"\\/") + 1).c_str());
-            SetWindowTextW(hWnd, title);
-        }, Settings::Instance().GetScanThreads());
-    PostMessageW(hWnd, WM_HEURISTIC_SCAN_DONE, 0, 0);
-    return 0;
-}
-
 // ---------------------------------------------------------------------------
 // Custom scan
 // ---------------------------------------------------------------------------
@@ -745,7 +722,11 @@ static void DoCustomScan(HWND hWnd)
 
     wchar_t msg[1024];
     if (r.result == ScanResult::Black) {
-        swprintf_s(msg, L"发现威胁！\n\n文件：%s\nMD5 ：%s\n\n状态：黑名单病毒文件", file.c_str(), md5W);
+        if (r.heuristicHit) {
+            swprintf_s(msg, L"发现威胁！\n\n文件：%s\nMD5 ：%s\n\n状态：启发式引擎检测到威胁特征（A5 77 B0）", file.c_str(), md5W);
+        } else {
+            swprintf_s(msg, L"发现威胁！\n\n文件：%s\nMD5 ：%s\n\n状态：黑名单病毒文件", file.c_str(), md5W);
+        }
         MessageBoxW(hWnd, msg, L"自定义扫描", MB_OK | MB_ICONERROR);
     } else if (r.result == ScanResult::White) {
         swprintf_s(msg, L"文件安全\n\n文件：%s\nMD5 ：%s\n\n状态：安全文件", file.c_str(), md5W);
@@ -766,14 +747,13 @@ static void RepositionButtons(HWND hWnd)
     GetClientRect(hWnd, &rc);
     int cx     = (rc.right - rc.left) / 2;
     int h      = rc.bottom - rc.top;
-    int totalW = BTN_W * 5 + BTN_GAP * 4;
+    int totalW = BTN_W * 4 + BTN_GAP * 3;
     int startX = cx - totalW / 2;
     int startY = h * 62 / 100 - BTN_H / 2;
-    SetWindowPos(hBtnHeuristicScan, nullptr, startX,                         startY, BTN_W, BTN_H, SWP_NOZORDER);
-    SetWindowPos(hBtnQuickScan,     nullptr, startX + (BTN_W + BTN_GAP),     startY, BTN_W, BTN_H, SWP_NOZORDER);
-    SetWindowPos(hBtnCustomScan,    nullptr, startX + (BTN_W + BTN_GAP) * 2, startY, BTN_W, BTN_H, SWP_NOZORDER);
-    SetWindowPos(hBtnTrustZone,     nullptr, startX + (BTN_W + BTN_GAP) * 3, startY, BTN_W, BTN_H, SWP_NOZORDER);
-    SetWindowPos(hBtnSettings,      nullptr, startX + (BTN_W + BTN_GAP) * 4, startY, BTN_W, BTN_H, SWP_NOZORDER);
+    SetWindowPos(hBtnQuickScan,     nullptr, startX,                         startY, BTN_W, BTN_H, SWP_NOZORDER);
+    SetWindowPos(hBtnCustomScan,    nullptr, startX + (BTN_W + BTN_GAP),     startY, BTN_W, BTN_H, SWP_NOZORDER);
+    SetWindowPos(hBtnTrustZone,     nullptr, startX + (BTN_W + BTN_GAP) * 2, startY, BTN_W, BTN_H, SWP_NOZORDER);
+    SetWindowPos(hBtnSettings,      nullptr, startX + (BTN_W + BTN_GAP) * 3, startY, BTN_W, BTN_H, SWP_NOZORDER);
 }
 
 // ---------------------------------------------------------------------------
@@ -789,10 +769,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         g_hFontTitle = MakeFont(22, true,  L"Microsoft YaHei");
         g_hFontSub   = MakeFont(10, false, L"Microsoft YaHei");
         g_hFontBtn   = MakeFont(11, false, L"Microsoft YaHei");
-
-        hBtnHeuristicScan = CreateWindowW(L"BUTTON", L"启发式扫描",
-            WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
-            0, 0, BTN_W, BTN_H, hWnd, (HMENU)IDC_BTN_HEURISTIC_SCAN, hInst, nullptr);
 
         hBtnQuickScan = CreateWindowW(L"BUTTON", L"快速扫描",
             WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
@@ -811,7 +787,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             0, 0, BTN_W, BTN_H, hWnd, (HMENU)IDC_BTN_SETTINGS, hInst, nullptr);
 
         if (g_hFontBtn) {
-            SendMessageW(hBtnHeuristicScan, WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
             SendMessageW(hBtnQuickScan,     WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
             SendMessageW(hBtnCustomScan,    WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
             SendMessageW(hBtnTrustZone,     WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
@@ -879,7 +854,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
         COLORREF clrN, clrP;
         switch (dis->CtlID) {
-        case IDC_BTN_HEURISTIC_SCAN: clrN = CLR_BTN_HS; clrP = CLR_BTN_HS_P; break;
         case IDC_BTN_QUICK_SCAN:  clrN = CLR_BTN_QS; clrP = CLR_BTN_QS_P; break;
         case IDC_BTN_CUSTOM_SCAN: clrN = CLR_BTN_CS; clrP = CLR_BTN_CS_P; break;
         case IDC_BTN_TRUST_ZONE:  clrN = CLR_BTN_TZ; clrP = CLR_BTN_TZ_P; break;
@@ -915,10 +889,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     case WM_SCAN_DONE:
     {
         SetWindowTextW(hWnd, szTitle);
-        EnableWindow(hBtnQuickScan,     TRUE);
-        EnableWindow(hBtnCustomScan,    TRUE);
-        EnableWindow(hBtnTrustZone,     TRUE);
-        EnableWindow(hBtnHeuristicScan, TRUE);
+        EnableWindow(hBtnQuickScan,  TRUE);
+        EnableWindow(hBtnCustomScan, TRUE);
+        EnableWindow(hBtnTrustZone,  TRUE);
         if (g_hScanThread) { CloseHandle(g_hScanThread); g_hScanThread = nullptr; }
 
         auto& r = g_scanStats;
@@ -929,10 +902,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             L"扫描完成！\n\n"
             L"共扫描文件：%d 个\n"
             L"黑名单（威胁）：%d 个\n"
+            L"  其中启发式引擎检出：%d 个\n"
             L"白名单（安全）：%d 个\n"
             L"未知文件：%d 个\n"
             L"读取失败：%d 个",
-            total, r.black, r.white, r.unknown, r.errors);
+            total, r.black, r.heuristicHits, r.white, r.unknown, r.errors);
 
         if (!r.blackFiles.empty()) {
             wcscat_s(msg, L"\n\n威胁文件列表：\n");
@@ -946,39 +920,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         break;
     }
 
-    case WM_HEURISTIC_SCAN_DONE:
-    {
-        SetWindowTextW(hWnd, szTitle);
-        EnableWindow(hBtnQuickScan,     TRUE);
-        EnableWindow(hBtnCustomScan,    TRUE);
-        EnableWindow(hBtnTrustZone,     TRUE);
-        EnableWindow(hBtnHeuristicScan, TRUE);
-        if (g_hHeuristicScanThread) { CloseHandle(g_hHeuristicScanThread); g_hHeuristicScanThread = nullptr; }
-
-        auto& r = g_heuristicScanStats;
-        int total = r.black + r.white + r.errors;
-
-        wchar_t msg[2048];
-        swprintf_s(msg,
-            L"启发式扫描完成！\n\n"
-            L"共扫描文件：%d 个\n"
-            L"威胁（含 A5 77 B0 特征）：%d 个\n"
-            L"安全：%d 个\n"
-            L"读取失败：%d 个",
-            total, r.black, r.white, r.errors);
-
-        if (!r.blackFiles.empty()) {
-            wcscat_s(msg, L"\n\n威胁文件列表：\n");
-            for (auto& f : r.blackFiles)
-                if (wcslen(msg) + f.size() + 2 < 2000)
-                    wcscat_s(msg, (f + L"\n").c_str());
-        }
-
-        UINT icon = r.black > 0 ? MB_ICONERROR : MB_ICONINFORMATION;
-        MessageBoxW(hWnd, msg, L"启发式扫描结果", MB_OK | icon);
-        break;
-    }
-
     case WM_COMMAND:
     {
         int wmId = LOWORD(wParam);
@@ -986,24 +927,14 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         {
         case IDC_BTN_QUICK_SCAN:
             if (g_hScanThread) break;
-            EnableWindow(hBtnQuickScan,     FALSE);
-            EnableWindow(hBtnCustomScan,    FALSE);
-            EnableWindow(hBtnTrustZone,     FALSE);
-            EnableWindow(hBtnHeuristicScan, FALSE);
+            EnableWindow(hBtnQuickScan,  FALSE);
+            EnableWindow(hBtnCustomScan, FALSE);
+            EnableWindow(hBtnTrustZone,  FALSE);
             g_hScanThread = CreateThread(nullptr, 0, ScanThread, hWnd, 0, nullptr);
             break;
 
         case IDC_BTN_CUSTOM_SCAN:
             DoCustomScan(hWnd);
-            break;
-
-        case IDC_BTN_HEURISTIC_SCAN:
-            if (g_hHeuristicScanThread) break;
-            EnableWindow(hBtnQuickScan,     FALSE);
-            EnableWindow(hBtnCustomScan,    FALSE);
-            EnableWindow(hBtnTrustZone,     FALSE);
-            EnableWindow(hBtnHeuristicScan, FALSE);
-            g_hHeuristicScanThread = CreateThread(nullptr, 0, HeuristicScanThread, hWnd, 0, nullptr);
             break;
 
         case IDC_BTN_TRUST_ZONE:
@@ -1052,7 +983,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         if (g_hFontBtn)   { DeleteObject(g_hFontBtn);   g_hFontBtn   = nullptr; }
         if (g_hBrushBg)   { DeleteObject(g_hBrushBg);   g_hBrushBg   = nullptr; }
         hBtnSettings = nullptr;
-        hBtnHeuristicScan = nullptr;
         PostQuitMessage(0);
         break;
 
