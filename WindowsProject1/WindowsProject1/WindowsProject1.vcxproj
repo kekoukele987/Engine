@@ -138,6 +138,8 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="BaselineCommon.h" />
+    <ClInclude Include="BaselineEngine.h" />
+    <ClInclude Include="BaselineDialog.h" />
     <ClInclude Include="framework.h" />
     <ClInclude Include="HeuristicEngine.h" />
     <ClInclude Include="HistoryDialog.h" />
@@ -154,6 +156,8 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="BaselineCommon.cpp" />
+    <ClCompile Include="BaselineEngine.cpp" />
+    <ClCompile Include="BaselineDialog.cpp" />
     <ClCompile Include="HeuristicEngine.cpp" />
     <ClCompile Include="HistoryDialog.cpp" />
     <ClCompile Include="Logger.cpp" />

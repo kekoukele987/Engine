@@ -8,6 +8,7 @@
 #include "Settings.h"
 #include "Logger.h"
 #include "ScanHistory.h"
+#include "BaselineDialog.h"
 #include <commdlg.h>
 #include <shlobj.h>
 #include <string>
@@ -35,18 +36,21 @@ struct LangStrings {
     const wchar_t* trustZone;
     const wchar_t* scanHistory;
     const wchar_t* settings;
+    const wchar_t* baselineCheck;
 };
 
 static const LangStrings kLang[] = {
     {
         L"Engine  杀毒引擎",
         L"MD5 特征码引擎  |  启发式引擎  |  实时防护已就绪",
-        L"快速扫描", L"自定义扫描", L"信任区管理", L"扫描历史", L"设置中心"
+        L"快速扫描", L"自定义扫描", L"信任区管理", L"扫描历史", L"设置中心",
+        L"基线检测"
     },
     {
         L"Engine  Antivirus",
         L"MD5 Signature Engine  |  Heuristic Engine  |  Real-time Protection Ready",
-        L"Quick Scan", L"Custom Scan", L"Trust Zone", L"Scan History", L"Settings"
+        L"Quick Scan", L"Custom Scan", L"Trust Zone", L"Scan History", L"Settings",
+        L"Baseline Check"
     },
 };
 static const LangStrings& Str() { return kLang[(int)Settings::Instance().GetLang()]; }
@@ -84,6 +88,7 @@ HWND hBtnCustomScan    = nullptr;
 HWND hBtnTrustZone     = nullptr;
 HWND hBtnScanHistory   = nullptr;
 HWND hBtnSettings      = nullptr;
+HWND hBtnBaseline      = nullptr;
 
 static HWND g_hHistoryDlg = nullptr;
 
@@ -528,6 +533,7 @@ static void ApplyLanguage(HWND hMainWnd)
     SetWindowTextW(hBtnTrustZone, Str().trustZone);
     if (hBtnScanHistory) SetWindowTextW(hBtnScanHistory, Str().scanHistory);
     if (hBtnSettings) SetWindowTextW(hBtnSettings, Str().settings);
+    if (hBtnBaseline) SetWindowTextW(hBtnBaseline, Str().baselineCheck);
     InvalidateRect(hMainWnd, nullptr, TRUE);
     // Settings dialog: repaint header title + option buttons
     if (g_hSettingsDlg) {
@@ -807,16 +813,17 @@ static void RepositionButtons(HWND hWnd)
     int cx     = (rc.right - rc.left) / 2;
     int h      = rc.bottom - rc.top;
     
-    // 现在有5个按钮，重新计算总宽度
-    int totalW = BTN_W * 5 + BTN_GAP * 4;
+    // 现在有6个按钮，重新计算总宽度
+    int totalW = BTN_W * 6 + BTN_GAP * 5;
     int startX = cx - totalW / 2;
     int startY = h * 62 / 100 - BTN_H / 2;
     
-    SetWindowPos(hBtnQuickScan,     nullptr, startX,                         startY, BTN_W, BTN_H, SWP_NOZORDER);
-    SetWindowPos(hBtnCustomScan,    nullptr, startX + (BTN_W + BTN_GAP),     startY, BTN_W, BTN_H, SWP_NOZORDER);
-    SetWindowPos(hBtnTrustZone,     nullptr, startX + (BTN_W + BTN_GAP) * 2, startY, BTN_W, BTN_H, SWP_NOZORDER);
-    SetWindowPos(hBtnScanHistory,   nullptr, startX + (BTN_W + BTN_GAP) * 3, startY, BTN_W, BTN_H, SWP_NOZORDER);
-    SetWindowPos(hBtnSettings,      nullptr, startX + (BTN_W + BTN_GAP) * 4, startY, BTN_W, BTN_H, SWP_NOZORDER);
+    SetWindowPos(hBtnQuickScan,     nullptr, startX,                              startY, BTN_W, BTN_H, SWP_NOZORDER);
+    SetWindowPos(hBtnCustomScan,    nullptr, startX + (BTN_W + BTN_GAP),          startY, BTN_W, BTN_H, SWP_NOZORDER);
+    SetWindowPos(hBtnTrustZone,     nullptr, startX + (BTN_W + BTN_GAP) * 2,      startY, BTN_W, BTN_H, SWP_NOZORDER);
+    SetWindowPos(hBtnScanHistory,   nullptr, startX + (BTN_W + BTN_GAP) * 3,      startY, BTN_W, BTN_H, SWP_NOZORDER);
+    SetWindowPos(hBtnSettings,      nullptr, startX + (BTN_W + BTN_GAP) * 4,      startY, BTN_W, BTN_H, SWP_NOZORDER);
+    SetWindowPos(hBtnBaseline,      nullptr, startX + (BTN_W + BTN_GAP) * 5,      startY, BTN_W, BTN_H, SWP_NOZORDER);
 }
 
 // ---------------------------------------------------------------------------
@@ -853,12 +860,17 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
             0, 0, BTN_W, BTN_H, hWnd, (HMENU)IDC_BTN_SETTINGS, hInst, nullptr);
 
+        hBtnBaseline = CreateWindowW(L"BUTTON", Str().baselineCheck,
+            WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+            0, 0, BTN_W, BTN_H, hWnd, (HMENU)IDC_BTN_BASELINE, hInst, nullptr);
+
         if (g_hFontBtn) {
             SendMessageW(hBtnQuickScan,     WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
             SendMessageW(hBtnCustomScan,    WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
             SendMessageW(hBtnTrustZone,     WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
             SendMessageW(hBtnScanHistory,   WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
             SendMessageW(hBtnSettings,      WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
+            SendMessageW(hBtnBaseline,      WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
         }
         // Apply persisted language so button texts match saved setting on startup
         ApplyLanguage(hWnd);
@@ -927,6 +939,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         case IDC_BTN_TRUST_ZONE:   clrN = CLR_BTN_TZ; clrP = CLR_BTN_TZ_P; break;
         case IDC_BTN_SCAN_HISTORY: clrN = CLR_BTN_ST; clrP = CLR_BTN_ST_P; break;
         case IDC_BTN_SETTINGS:     clrN = CLR_BTN_ST; clrP = CLR_BTN_ST_P; break;
+        case IDC_BTN_BASELINE:     clrN = CLR_BTN_TZ; clrP = CLR_BTN_TZ_P; break;
         default:                   clrN = CLR_BTN_DIS; clrP = CLR_BTN_DIS;  break;
         }
         COLORREF fill = disabled ? CLR_BTN_DIS : (pressed ? clrP : clrN);
@@ -1051,6 +1064,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
         case IDC_BTN_SCAN_HISTORY:
             HistoryDialog::Show(hWnd);
+            break;
+
+        case IDC_BTN_BASELINE:
+            BaselineDialog::Show(hWnd);
             break;
 
         case IDC_BTN_SETTINGS:
