@@ -38,6 +38,7 @@
 #define IDC_BTN_SW_MANAGER      1033
 #define IDC_BTN_SHREDDER        1034
 #define IDC_BTN_STARTUP         1035
+#define IDC_BTN_FILE_SEARCH     1036
 
 // 历史记录对话框
 #define IDD_HISTORY_DIALOG      2000
