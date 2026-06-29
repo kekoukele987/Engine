@@ -151,6 +151,8 @@
     <ClInclude Include="SoftwareManager.h" />
     <ClInclude Include="FileShredder.h" />
     <ClInclude Include="ShredDialog.h" />
+    <ClInclude Include="StartupDialog.h" />
+    <ClInclude Include="StartupManager.h" />
     <ClInclude Include="Resource.h" />
     <ClInclude Include="ScanHistory.h" />
     <ClInclude Include="Settings.h" />
@@ -174,6 +176,8 @@
     <ClCompile Include="SoftwareManager.cpp" />
     <ClCompile Include="FileShredder.cpp" />
     <ClCompile Include="ShredDialog.cpp" />
+    <ClCompile Include="StartupDialog.cpp" />
+    <ClCompile Include="StartupManager.cpp" />
     <ClCompile Include="ScanHistory.cpp" />
     <ClCompile Include="Settings.cpp" />
     <ClCompile Include="SignatureEngine.cpp" />
