@@ -848,25 +848,26 @@ static void RepositionButtons(HWND hWnd)
     int cx     = (rc.right - rc.left) / 2;
     int h      = rc.bottom - rc.top;
     
-    // 2 rows: Row1 = 5, Row2 = 6
+    // 2 rows: Row1 = 5, Row2 = 7
     int tw1 = BTN_W * 5 + BTN_GAP * 4;
-    int tw2 = BTN_W * 6 + BTN_GAP * 5;
+    int tw2 = BTN_W * 7 + BTN_GAP * 6;
     int sx1 = cx - tw1 / 2;
     int sx2 = cx - tw2 / 2;
     int y1  = h * 53 / 100 - BTN_H;
     int y2  = h * 53 / 100 + 8;
     auto sp = [](HWND b, int x, int y) { SetWindowPos(b, nullptr, x, y, BTN_W, BTN_H, SWP_NOZORDER); };
-    sp(hBtnQuickScan,   sx1,                                                  y1);
-    sp(hBtnCustomScan,  sx1 + (BTN_W + BTN_GAP),                              y1);
-    sp(hBtnTrustZone,   sx1 + (BTN_W + BTN_GAP) * 2,                          y1);
-    sp(hBtnScanHistory, sx1 + (BTN_W + BTN_GAP) * 3,                          y1);
-    sp(hBtnSettings,    sx1 + (BTN_W + BTN_GAP) * 4,                          y1);
-    sp(hBtnBaseline,    sx2,                                                  y2);
-    sp(hBtnSWManager,   sx2 + (BTN_W + BTN_GAP),                              y2);
-    sp(hBtnShredder,    sx2 + (BTN_W + BTN_GAP) * 2,                          y2);
-    sp(hBtnStartup,     sx2 + (BTN_W + BTN_GAP) * 3,                          y2);
-    sp(hBtnFileSearch,  sx2 + (BTN_W + BTN_GAP) * 4,                          y2);
-    sp(hBtnProcMgr,     sx2 + (BTN_W + BTN_GAP) * 5,                          y2);
+    sp(hBtnQuickScan,   sx1,                                      y1);
+    sp(hBtnCustomScan,  sx1 + (BTN_W + BTN_GAP),                  y1);
+    sp(hBtnTrustZone,   sx1 + (BTN_W + BTN_GAP) * 2,              y1);
+    sp(hBtnScanHistory, sx1 + (BTN_W + BTN_GAP) * 3,              y1);
+    sp(hBtnSettings,    sx1 + (BTN_W + BTN_GAP) * 4,              y1);
+    sp(hBtnBaseline,    sx2,                                      y2);
+    sp(hBtnSWManager,   sx2 + (BTN_W + BTN_GAP),                  y2);
+    sp(hBtnShredder,    sx2 + (BTN_W + BTN_GAP) * 2,              y2);
+    sp(hBtnStartup,     sx2 + (BTN_W + BTN_GAP) * 3,              y2);
+    sp(hBtnFileSearch,  sx2 + (BTN_W + BTN_GAP) * 4,              y2);
+    sp(hBtnProcMgr,     sx2 + (BTN_W + BTN_GAP) * 5,              y2);
+    sp(hBtnObjMgr,      sx2 + (BTN_W + BTN_GAP) * 6,              y2);
 }
 
 // ---------------------------------------------------------------------------
@@ -927,6 +928,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
             0, 0, BTN_W, BTN_H, hWnd, (HMENU)IDC_BTN_PROC_MGR, hInst, nullptr);
 
+        hBtnObjMgr = CreateWindowW(L"BUTTON", Str().objManager,
+            WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+            0, 0, BTN_W, BTN_H, hWnd, (HMENU)IDC_BTN_OBJ_MGR, hInst, nullptr);
+
         if (g_hFontBtn) {
             SendMessageW(hBtnQuickScan,     WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
             SendMessageW(hBtnCustomScan,    WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
@@ -939,6 +944,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             SendMessageW(hBtnStartup,       WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
             SendMessageW(hBtnFileSearch,    WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
             SendMessageW(hBtnProcMgr,       WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
+            SendMessageW(hBtnObjMgr,        WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
         }
         // Apply persisted language so button texts match saved setting on startup
         ApplyLanguage(hWnd);
