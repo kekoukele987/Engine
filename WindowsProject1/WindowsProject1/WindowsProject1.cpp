@@ -8,6 +8,7 @@
 #include "ShredDialog.h"
 #include "StartupDialog.h"
 #include "FastSearchDialog.h"
+#include "ProcDialog.h"
 #include "TrustZone.h"
 #include "Settings.h"
 #include "Logger.h"
@@ -45,6 +46,7 @@ struct LangStrings {
     const wchar_t* fileShredder;
     const wchar_t* startupManager;
     const wchar_t* fileSearcher;
+    const wchar_t* procManager;
 };
 
 static const LangStrings kLang[] = {
@@ -56,7 +58,8 @@ static const LangStrings kLang[] = {
         L"软件管理",
         L"文件粉碎机",
         L"启动项管理",
-        L"文件搜索"
+        L"文件搜索",
+        L"进程管理"
     },
     {
         L"Engine  Antivirus",
@@ -66,7 +69,8 @@ static const LangStrings kLang[] = {
         L"Software Manager",
         L"File Shredder",
         L"Startup Manager",
-        L"File Search"
+        L"File Search",
+        L"Process Manager"
     },
 };
 static const LangStrings& Str() { return kLang[(int)Settings::Instance().GetLang()]; }
@@ -109,6 +113,7 @@ HWND hBtnSWManager     = nullptr;
 HWND hBtnShredder      = nullptr;
 HWND hBtnStartup       = nullptr;
 HWND hBtnFileSearch    = nullptr;
+HWND hBtnProcMgr      = nullptr;
 
 static HWND g_hHistoryDlg = nullptr;
 
@@ -558,6 +563,7 @@ static void ApplyLanguage(HWND hMainWnd)
     if (hBtnShredder) SetWindowTextW(hBtnShredder, Str().fileShredder);
     if (hBtnStartup) SetWindowTextW(hBtnStartup, Str().startupManager);
     if (hBtnFileSearch) SetWindowTextW(hBtnFileSearch, Str().fileSearcher);
+    if (hBtnProcMgr) SetWindowTextW(hBtnProcMgr, Str().procManager);
     InvalidateRect(hMainWnd, nullptr, TRUE);
     // Settings dialog: repaint header title + option buttons
     if (g_hSettingsDlg) {
@@ -837,23 +843,25 @@ static void RepositionButtons(HWND hWnd)
     int cx     = (rc.right - rc.left) / 2;
     int h      = rc.bottom - rc.top;
     
-    // 2 rows: Row1 = 5, Row2 = 5
-    int tw = BTN_W * 5 + BTN_GAP * 4;
-    int sx1 = cx - tw / 2;
-    int sx2 = cx - tw / 2;
-    int y1  = h * 55 / 100 - BTN_H;
-    int y2  = h * 55 / 100 + 8;
+    // 2 rows: Row1 = 5, Row2 = 6
+    int tw1 = BTN_W * 5 + BTN_GAP * 4;
+    int tw2 = BTN_W * 6 + BTN_GAP * 5;
+    int sx1 = cx - tw1 / 2;
+    int sx2 = cx - tw2 / 2;
+    int y1  = h * 53 / 100 - BTN_H;
+    int y2  = h * 53 / 100 + 8;
     auto sp = [](HWND b, int x, int y) { SetWindowPos(b, nullptr, x, y, BTN_W, BTN_H, SWP_NOZORDER); };
-    sp(hBtnQuickScan,   sx1,                                                 y1);
-    sp(hBtnCustomScan,  sx1 + (BTN_W + BTN_GAP),                             y1);
-    sp(hBtnTrustZone,   sx1 + (BTN_W + BTN_GAP) * 2,                         y1);
-    sp(hBtnScanHistory, sx1 + (BTN_W + BTN_GAP) * 3,                         y1);
-    sp(hBtnSettings,    sx1 + (BTN_W + BTN_GAP) * 4,                         y1);
-    sp(hBtnBaseline,    sx2,                                                 y2);
-    sp(hBtnSWManager,   sx2 + (BTN_W + BTN_GAP),                             y2);
-    sp(hBtnShredder,    sx2 + (BTN_W + BTN_GAP) * 2,                         y2);
-    sp(hBtnStartup,     sx2 + (BTN_W + BTN_GAP) * 3,                         y2);
-    sp(hBtnFileSearch,  sx2 + (BTN_W + BTN_GAP) * 4,                         y2);
+    sp(hBtnQuickScan,   sx1,                                                  y1);
+    sp(hBtnCustomScan,  sx1 + (BTN_W + BTN_GAP),                              y1);
+    sp(hBtnTrustZone,   sx1 + (BTN_W + BTN_GAP) * 2,                          y1);
+    sp(hBtnScanHistory, sx1 + (BTN_W + BTN_GAP) * 3,                          y1);
+    sp(hBtnSettings,    sx1 + (BTN_W + BTN_GAP) * 4,                          y1);
+    sp(hBtnBaseline,    sx2,                                                  y2);
+    sp(hBtnSWManager,   sx2 + (BTN_W + BTN_GAP),                              y2);
+    sp(hBtnShredder,    sx2 + (BTN_W + BTN_GAP) * 2,                          y2);
+    sp(hBtnStartup,     sx2 + (BTN_W + BTN_GAP) * 3,                          y2);
+    sp(hBtnFileSearch,  sx2 + (BTN_W + BTN_GAP) * 4,                          y2);
+    sp(hBtnProcMgr,     sx2 + (BTN_W + BTN_GAP) * 5,                          y2);
 }
 
 // ---------------------------------------------------------------------------
@@ -910,6 +918,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
             0, 0, BTN_W, BTN_H, hWnd, (HMENU)IDC_BTN_FILE_SEARCH, hInst, nullptr);
 
+        hBtnProcMgr = CreateWindowW(L"BUTTON", Str().procManager,
+            WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+            0, 0, BTN_W, BTN_H, hWnd, (HMENU)IDC_BTN_PROC_MGR, hInst, nullptr);
+
         if (g_hFontBtn) {
             SendMessageW(hBtnQuickScan,     WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
             SendMessageW(hBtnCustomScan,    WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
@@ -921,6 +933,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             SendMessageW(hBtnShredder,      WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
             SendMessageW(hBtnStartup,       WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
             SendMessageW(hBtnFileSearch,    WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
+            SendMessageW(hBtnProcMgr,       WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
         }
         // Apply persisted language so button texts match saved setting on startup
         ApplyLanguage(hWnd);
@@ -994,6 +1007,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         case IDC_BTN_SHREDDER:     clrN = CLR_BTN_RED; clrP = CLR_BTN_RED_P; break;
         case IDC_BTN_STARTUP:      clrN = CLR_BTN_CS; clrP = CLR_BTN_CS_P; break;
         case IDC_BTN_FILE_SEARCH:  clrN = CLR_BTN_QS; clrP = CLR_BTN_QS_P; break;
+        case IDC_BTN_PROC_MGR:     clrN = CLR_BTN_ST; clrP = CLR_BTN_ST_P; break;
         default:                   clrN = CLR_BTN_DIS; clrP = CLR_BTN_DIS;  break;
         }
         COLORREF fill = disabled ? CLR_BTN_DIS : (pressed ? clrP : clrN);
@@ -1138,6 +1152,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
         case IDC_BTN_FILE_SEARCH:
             FastSearchDialog::Show(hWnd);
+            break;
+
+        case IDC_BTN_PROC_MGR:
+            ProcDialog::Show(hWnd);
             break;
 
         case IDC_BTN_SETTINGS:
