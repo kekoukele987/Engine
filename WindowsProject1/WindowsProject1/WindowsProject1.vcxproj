@@ -157,6 +157,8 @@
     <ClInclude Include="FastSearchDialog.h" />
     <ClInclude Include="ProcDialog.h" />
     <ClInclude Include="ProcessManager.h" />
+    <ClInclude Include="ObjectManager.h" />
+    <ClInclude Include="ObjDialog.h" />
     <ClInclude Include="Resource.h" />
     <ClInclude Include="ScanHistory.h" />
     <ClInclude Include="Settings.h" />
@@ -186,6 +188,8 @@
     <ClCompile Include="FastSearchDialog.cpp" />
     <ClCompile Include="ProcDialog.cpp" />
     <ClCompile Include="ProcessManager.cpp" />
+    <ClCompile Include="ObjectManager.cpp" />
+    <ClCompile Include="ObjDialog.cpp" />
     <ClCompile Include="ScanHistory.cpp" />
     <ClCompile Include="Settings.cpp" />
     <ClCompile Include="SignatureEngine.cpp" />

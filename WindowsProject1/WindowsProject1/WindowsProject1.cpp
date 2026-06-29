@@ -9,6 +9,7 @@
 #include "StartupDialog.h"
 #include "FastSearchDialog.h"
 #include "ProcDialog.h"
+#include "ObjDialog.h"
 #include "TrustZone.h"
 #include "Settings.h"
 #include "Logger.h"
@@ -47,6 +48,7 @@ struct LangStrings {
     const wchar_t* startupManager;
     const wchar_t* fileSearcher;
     const wchar_t* procManager;
+    const wchar_t* objManager;
 };
 
 static const LangStrings kLang[] = {
@@ -59,7 +61,8 @@ static const LangStrings kLang[] = {
         L"文件粉碎机",
         L"启动项管理",
         L"文件搜索",
-        L"进程管理"
+        L"进程管理",
+        L"对象管理"
     },
     {
         L"Engine  Antivirus",
@@ -70,7 +73,8 @@ static const LangStrings kLang[] = {
         L"File Shredder",
         L"Startup Manager",
         L"File Search",
-        L"Process Manager"
+        L"Process Manager",
+        L"Object Manager"
     },
 };
 static const LangStrings& Str() { return kLang[(int)Settings::Instance().GetLang()]; }
@@ -114,6 +118,7 @@ HWND hBtnShredder      = nullptr;
 HWND hBtnStartup       = nullptr;
 HWND hBtnFileSearch    = nullptr;
 HWND hBtnProcMgr      = nullptr;
+HWND hBtnObjMgr       = nullptr;
 
 static HWND g_hHistoryDlg = nullptr;
 
@@ -1154,11 +1159,15 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             FastSearchDialog::Show(hWnd);
             break;
 
-        case IDC_BTN_PROC_MGR:
-            ProcDialog::Show(hWnd);
-            break;
+    case IDC_BTN_PROC_MGR:
+        ProcDialog::Show(hWnd);
+        break;
 
-        case IDC_BTN_SETTINGS:
+    case IDC_BTN_OBJ_MGR:
+        ObjDialog::Show(hWnd);
+        break;
+
+    case IDC_BTN_SETTINGS:
             if (g_hSettingsDlg) { SetForegroundWindow(g_hSettingsDlg); break; }
             g_hSettingsDlg = CreateWindowW(kSettingsDlgClass,
                 Settings::Instance().GetLang() == AppLang::Chinese ? L"设置中心" : L"Settings",

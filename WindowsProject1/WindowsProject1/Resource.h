@@ -40,6 +40,7 @@
 #define IDC_BTN_STARTUP         1035
 #define IDC_BTN_FILE_SEARCH     1036
 #define IDC_BTN_PROC_MGR        1037
+#define IDC_BTN_OBJ_MGR         1038
 
 // 历史记录对话框
 #define IDD_HISTORY_DIALOG      2000
