@@ -35,6 +35,7 @@
 #define IDC_BTN_CLEAR_ALL       1030
 #define IDC_STATUS              1031
 #define IDC_BTN_BASELINE        1032
+#define IDC_BTN_SW_MANAGER      1033
 
 // 历史记录对话框
 #define IDD_HISTORY_DIALOG      2000

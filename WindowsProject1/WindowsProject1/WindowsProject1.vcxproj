@@ -147,6 +147,8 @@
     <ClInclude Include="MD5Engine.h" />
     <ClInclude Include="MD5Hasher.h" />
     <ClInclude Include="Scanner.h" />
+    <ClInclude Include="SoftwareDialog.h" />
+    <ClInclude Include="SoftwareManager.h" />
     <ClInclude Include="Resource.h" />
     <ClInclude Include="ScanHistory.h" />
     <ClInclude Include="Settings.h" />
@@ -166,6 +168,8 @@
     <ClCompile Include="MD5Engine.cpp" />
     <ClCompile Include="MD5Hasher.cpp" />
     <ClCompile Include="Scanner.cpp" />
+    <ClCompile Include="SoftwareDialog.cpp" />
+    <ClCompile Include="SoftwareManager.cpp" />
     <ClCompile Include="ScanHistory.cpp" />
     <ClCompile Include="Settings.cpp" />
     <ClCompile Include="SignatureEngine.cpp" />
