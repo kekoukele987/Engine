@@ -297,13 +297,29 @@ void BaselineDialog::ExportReport(HWND hWnd)
             cn += "<td>" + std::to_string(i + 1) + "</td>";
 
             auto esc = [](const std::wstring& ws) -> std::string {
-                std::string s(ws.begin(), ws.end());
-                // Simple HTML escape
-                size_t pos;
-                while ((pos = s.find('&')) != std::string::npos) s.replace(pos, 1, "&");
-                while ((pos = s.find('<')) != std::string::npos) s.replace(pos, 1, "<");
-                while ((pos = s.find('>')) != std::string::npos) s.replace(pos, 1, ">");
-                return s;
+                // 先用 WideCharToMultiByte 做正确的 UTF-8 编码转换（支持中文等非ASCII字符）
+                std::string s;
+                if (!ws.empty()) {
+                    int n = WideCharToMultiByte(CP_UTF8, 0, ws.c_str(), -1,
+                                                nullptr, 0, nullptr, nullptr);
+                    if (n > 0) {
+                        s.resize(n - 1);
+                        WideCharToMultiByte(CP_UTF8, 0, ws.c_str(), -1,
+                                            s.data(), n, nullptr, nullptr);
+                    }
+                }
+                // Simple HTML escape — 逐字符处理，避免 & 替换自身导致的无限循环
+                std::string out;
+                out.reserve(s.size() + 32);
+                for (unsigned char c : s) {
+                    switch (c) {
+                    case '&': out.push_back('&'); out.append("amp;");  break;
+                    case '<': out.push_back('&'); out.append("lt;");   break;
+                    case '>': out.push_back('&'); out.append("gt;");   break;
+                    default:  out += c;           break;
+                    }
+                }
+                return out;
             };
 
             const char* rclass = "";
