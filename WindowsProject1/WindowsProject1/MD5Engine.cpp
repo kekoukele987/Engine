@@ -1,6 +1,7 @@
 #include "framework.h"
 #include "MD5Engine.h"
 #include "HeuristicEngine.h"
+#include "SignatureEngine.h"
 #include "TrustZone.h"
 #include "Logger.h"
 #include <wincrypt.h>
@@ -140,7 +141,15 @@ ScanReport ScanFile(const std::wstring& filePath)
         } else if (heurError) {
             r.result = ScanResult::Unknown;  // 读取失败，保持未知
         } else {
-            r.result = ScanResult::Unknown;  // 启发式未命中，仍为未知
+            // MD5 未知且启发式未命中：运行签名检测
+            bool sigError = false;
+            if (SignatureEngine::Instance().CheckSignature(filePath, sigError)) {
+                r.result = ScanResult::White;
+                r.signatureHit = true;
+            } else if (sigError) {
+                r.signatureError = true;  // 签名检测出错
+            }
+            // 签名检测未命中或出错，保持未知状态
         }
     }
     return r;
@@ -264,7 +273,16 @@ static void ScanDirectory(
                 ++stats.heuristicHits;
                 stats.blackFiles.push_back(filePath);
             } else {
-                ++stats.unknown;
+                // MD5 未知且启发式未命中：运行签名检测
+                bool sigError = false;
+                if (SignatureEngine::Instance().CheckSignature(filePath, sigError)) {
+                    ++stats.white;
+                    ++stats.signatureHits;
+                } else if (sigError) {
+                    ++stats.errors;
+                } else {
+                    ++stats.unknown;
+                }
             }
         }
 
@@ -354,6 +372,7 @@ QuickScanStats QuickScan(ProgressFn onProgress, int threadCount)
         result.unknown       += w.stats.unknown;
         result.errors        += w.stats.errors;
         result.heuristicHits += w.stats.heuristicHits;
+        result.signatureHits += w.stats.signatureHits;
         result.blackFiles.insert(result.blackFiles.end(),
                                  w.stats.blackFiles.begin(),
                                  w.stats.blackFiles.end());

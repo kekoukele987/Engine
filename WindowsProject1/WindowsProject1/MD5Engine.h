@@ -9,6 +9,8 @@ struct ScanReport {
     std::string md5;
     ScanResult  result;
     bool        heuristicHit = false;  // true = 由启发式引擎判定为黑
+    bool        signatureHit = false;  // true = 由签名引擎判定为有效签名（白）
+    bool        signatureError = false; // true = 签名检测出错
 };
 
 struct QuickScanStats {
@@ -17,6 +19,7 @@ struct QuickScanStats {
     int unknown = 0;
     int errors  = 0;
     int heuristicHits = 0;             // 启发式引擎命中的威胁数
+    int signatureHits = 0;            // 签名引擎命中的白文件数
     std::vector<std::wstring> blackFiles;
 };
 
