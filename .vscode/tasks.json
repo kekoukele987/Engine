@@ -1,0 +1,28 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "msbuild 生成 (x64 Debug)",
+            "type": "shell",
+            "command": "msbuild",
+            "args": [
+                "WindowsProject1/WindowsProject1/WindowsProject1.vcxproj",
+                "/p:Configuration=Debug",
+                "/p:Platform=x64",
+                "/t:Build",
+                "/nologo"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [
+                "$msCompile"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "detail": "使用 MSBuild 构建 WindowsProject1 (Debug x64)"
+        }
+    ]
+}

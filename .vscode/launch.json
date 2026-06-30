@@ -1,0 +1,17 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "WindowsProject1 (x64 Debug)",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/WindowsProject1/WindowsProject1/x64/Debug/WindowsProject1.exe",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}/WindowsProject1/WindowsProject1/x64/Debug",
+            "environment": [],
+            "console": "externalTerminal",
+            "preLaunchTask": "msbuild 生成 (x64 Debug)"
+        }
+    ]
+}
