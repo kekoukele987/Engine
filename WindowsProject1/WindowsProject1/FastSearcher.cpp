@@ -88,25 +88,20 @@ void FastSearcher::BuildIndex(SearchProgressFn onProgress)
 {
     ClearIndex();
 
-    wchar_t volumeName[MAX_PATH];
-    HANDLE hFind = FindFirstVolumeW(volumeName, MAX_PATH);
-    if (hFind == INVALID_HANDLE_VALUE) return;
+    // 枚举所有逻辑驱动器盘符
+    wchar_t drives[256] = {};
+    GetLogicalDriveStringsW(256, drives);
 
-    do {
+    for (wchar_t* p = drives; *p; p += wcslen(p) + 1) {
         wchar_t fsName[16] = {};
-        wchar_t rootPath[MAX_PATH] = {};
-        size_t len = wcslen(volumeName);
-        if (len > 1) wcsncpy_s(rootPath, volumeName, len - 1);
-
-        if (GetVolumeInformationW(rootPath, nullptr, 0, nullptr, nullptr,
+        if (GetVolumeInformationW(p, nullptr, 0, nullptr, nullptr,
                                   nullptr, fsName, 16) &&
             _wcsicmp(fsName, L"NTFS") == 0)
         {
-            EnumerateVolumeUsn(volumeName, onProgress);
+            EnumerateVolumeUsn(p, onProgress);
         }
-    } while (FindNextVolumeW(hFind, volumeName, MAX_PATH));
+    }
 
-    FindVolumeClose(hFind);
     m_indexBuilt = true;
 }
 
@@ -117,9 +112,9 @@ void FastSearcher::BuildIndex(SearchProgressFn onProgress)
 void FastSearcher::EnumerateVolumeUsn(const std::wstring& volumePath,
                                        SearchProgressFn onProgress)
 {
-    // 提取卷符号，如 \\.\C:
+    // volumePath 来自 GetLogicalDriveStringsW，格式如 "C:\"
     std::wstring volDev = L"\\\\.\\";
-    volDev += volumePath[4];
+    volDev += volumePath[0];
     volDev += L':';
 
     HANDLE hVol = CreateFileW(volDev.c_str(),

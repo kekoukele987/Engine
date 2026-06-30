@@ -67,7 +67,7 @@ private:
     void EnumerateVolumeUsn(const std::wstring& volumePath,
                             SearchProgressFn onProgress);
 
-    // --- NtQueryDirectoryFile ---
+    // --- NtQueryDirectoryFile 直接搜索 ---
     void NtQueryEnumDir(const std::wstring& dirPath,
                         std::vector<FileSearchResult>& results,
                         const std::wstring& pattern,

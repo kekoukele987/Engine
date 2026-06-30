@@ -135,6 +135,9 @@
       <Command>powershell -WindowStyle Hidden -Command "if (Test-Path '$(ProjectDir)data') { Copy-Item -Recurse -Force '$(ProjectDir)data\*' '$(OutDir)data' }"</Command>
       <Message>Copying data directory to output</Message>
     </PostBuildEvent>
+    <Link>
+      <UACExecutionLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">RequireAdministrator</UACExecutionLevel>
+    </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="BaselineCommon.h" />
