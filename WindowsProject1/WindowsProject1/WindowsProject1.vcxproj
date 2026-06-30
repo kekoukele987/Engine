@@ -132,7 +132,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup>
     <PostBuildEvent>
-      <Command>if exist "$(ProjectDir)data" xcopy /E /I /Y "$(ProjectDir)data" "$(OutDir)data" &gt; nul 2&gt;&amp;1</Command>
+      <Command>powershell -WindowStyle Hidden -Command "if (Test-Path '$(ProjectDir)data') { Copy-Item -Recurse -Force '$(ProjectDir)data\*' '$(OutDir)data' }"</Command>
       <Message>Copying data directory to output</Message>
     </PostBuildEvent>
   </ItemDefinitionGroup>
