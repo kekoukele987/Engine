@@ -280,8 +280,9 @@ ATOM MyRegisterClass(HINSTANCE hInstance)
 BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 {
     hInst = hInstance;
-    HWND hWnd = CreateWindowW(szWindowClass, szTitle, WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT, 0, 900, 600, nullptr, nullptr, hInstance, nullptr);
+    HWND hWnd = CreateWindowW(szWindowClass, szTitle,
+        WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
+        CW_USEDEFAULT, 0, 860, 620, nullptr, nullptr, hInstance, nullptr);
     if (!hWnd) return FALSE;
     ShowWindow(hWnd, nCmdShow);
     UpdateWindow(hWnd);
@@ -845,29 +846,34 @@ static void RepositionButtons(HWND hWnd)
 {
     RECT rc;
     GetClientRect(hWnd, &rc);
-    int cx     = (rc.right - rc.left) / 2;
-    int h      = rc.bottom - rc.top;
+    int cw = rc.right - rc.left;
+    int ch = rc.bottom - rc.top;
     
-    // 2 rows: Row1 = 5, Row2 = 7
-    int tw1 = BTN_W * 5 + BTN_GAP * 4;
-    int tw2 = BTN_W * 7 + BTN_GAP * 6;
-    int sx1 = cx - tw1 / 2;
-    int sx2 = cx - tw2 / 2;
-    int y1  = h * 53 / 100 - BTN_H;
-    int y2  = h * 53 / 100 + 8;
+    // 3 rows × 4 buttons per row
+    const int perRow = 4;
+    int rowW = BTN_W * perRow + BTN_GAP * (perRow - 1);
+    int sx = (cw - rowW) / 2;
+    int yStart = ch * 55 / 100 - BTN_H;  // 稍微上移
+    
     auto sp = [](HWND b, int x, int y) { SetWindowPos(b, nullptr, x, y, BTN_W, BTN_H, SWP_NOZORDER); };
-    sp(hBtnQuickScan,   sx1,                                      y1);
-    sp(hBtnCustomScan,  sx1 + (BTN_W + BTN_GAP),                  y1);
-    sp(hBtnTrustZone,   sx1 + (BTN_W + BTN_GAP) * 2,              y1);
-    sp(hBtnScanHistory, sx1 + (BTN_W + BTN_GAP) * 3,              y1);
-    sp(hBtnSettings,    sx1 + (BTN_W + BTN_GAP) * 4,              y1);
-    sp(hBtnBaseline,    sx2,                                      y2);
-    sp(hBtnSWManager,   sx2 + (BTN_W + BTN_GAP),                  y2);
-    sp(hBtnShredder,    sx2 + (BTN_W + BTN_GAP) * 2,              y2);
-    sp(hBtnStartup,     sx2 + (BTN_W + BTN_GAP) * 3,              y2);
-    sp(hBtnFileSearch,  sx2 + (BTN_W + BTN_GAP) * 4,              y2);
-    sp(hBtnProcMgr,     sx2 + (BTN_W + BTN_GAP) * 5,              y2);
-    sp(hBtnObjMgr,      sx2 + (BTN_W + BTN_GAP) * 6,              y2);
+    
+    // Row 1
+    sp(hBtnQuickScan,   sx,                                         yStart);
+    sp(hBtnCustomScan,  sx + (BTN_W + BTN_GAP),                     yStart);
+    sp(hBtnTrustZone,   sx + (BTN_W + BTN_GAP) * 2,                 yStart);
+    sp(hBtnScanHistory, sx + (BTN_W + BTN_GAP) * 3,                 yStart);
+    
+    // Row 2
+    sp(hBtnSettings,    sx,                                         yStart + BTN_H + BTN_GAP);
+    sp(hBtnBaseline,    sx + (BTN_W + BTN_GAP),                     yStart + BTN_H + BTN_GAP);
+    sp(hBtnSWManager,   sx + (BTN_W + BTN_GAP) * 2,                 yStart + BTN_H + BTN_GAP);
+    sp(hBtnShredder,    sx + (BTN_W + BTN_GAP) * 3,                 yStart + BTN_H + BTN_GAP);
+    
+    // Row 3
+    sp(hBtnStartup,     sx,                                         yStart + (BTN_H + BTN_GAP) * 2);
+    sp(hBtnFileSearch,  sx + (BTN_W + BTN_GAP),                     yStart + (BTN_H + BTN_GAP) * 2);
+    sp(hBtnProcMgr,     sx + (BTN_W + BTN_GAP) * 2,                 yStart + (BTN_H + BTN_GAP) * 2);
+    sp(hBtnObjMgr,      sx + (BTN_W + BTN_GAP) * 3,                 yStart + (BTN_H + BTN_GAP) * 2);
 }
 
 // ---------------------------------------------------------------------------
