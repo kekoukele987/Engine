@@ -2,6 +2,7 @@
 #include "Scanner.h"
 #include "HeuristicEngine.h"
 #include "SignatureEngine.h"
+#include "ScriptAnalyzerEngine.h"
 #include "TrustZone.h"
 #include "Logger.h"
 #include <fstream>
@@ -101,7 +102,14 @@ ScanReport Scanner::ScanFile(const std::wstring& filePath)
             } else if (sigError) {
                 r.signatureError = true;  // 签名检测出错
             }
-            // 签名检测未命中或出错，保持未知状态
+            // 签名检测未命中或出错：运行脚本分析引擎
+            if (r.result == ScanResult::Unknown) {
+                bool scriptError = false;
+                if (ScriptAnalyzerEngine::Instance().AnalyzeScript(filePath, scriptError)) {
+                    r.result = ScanResult::Black;
+                    r.scriptHit = true;
+                }
+            }
         }
     }
     return r;
@@ -221,7 +229,15 @@ void Scanner::ScanDirectory(
                 } else if (sigError) {
                     ++stats.errors;
                 } else {
-                    ++stats.unknown;
+                    // 签名检测未命中：运行脚本分析引擎
+                    bool scriptError = false;
+                    if (ScriptAnalyzerEngine::Instance().AnalyzeScript(filePath, scriptError)) {
+                        ++stats.black;
+                        ++stats.scriptHits;
+                        stats.blackFiles.push_back(filePath);
+                    } else {
+                        ++stats.unknown;
+                    }
                 }
             }
         }

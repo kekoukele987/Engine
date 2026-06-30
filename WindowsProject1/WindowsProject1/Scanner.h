@@ -17,6 +17,7 @@ struct ScanReport {
     bool        heuristicHit = false;   // true = 由启发式引擎判定为黑
     bool        signatureHit = false;   // true = 由签名引擎判定为有效签名（白）
     bool        signatureError = false; // true = 签名检测出错
+    bool        scriptHit    = false;   // true = 由脚本分析引擎判定为黑
 };
 
 struct QuickScanStats {
@@ -26,6 +27,7 @@ struct QuickScanStats {
     int errors         = 0;
     int heuristicHits  = 0;
     int signatureHits  = 0;
+    int scriptHits     = 0;   // 脚本分析引擎命中数
     std::vector<std::wstring> blackFiles;
 };
 

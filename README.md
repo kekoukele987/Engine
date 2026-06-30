@@ -11,6 +11,7 @@
 - **MD5 特征码引擎** — 基于黑/白名单 MD5 特征库对文件进行精确匹配
 - **启发式引擎** — 扫描文件字节流，发现连续的特征码 `A5 77 B0` 判定为威胁
 - **数字签名引擎** — 检测 PE 文件的数字签名状态，有有效签名的文件判定为安全文件
+- **脚本分析引擎** — 对 `.bat`/`.cmd`/`.vbs`/`.js`/`.ps1`/`.hta` 等脚本文件进行静态分析，检测恶意/可疑脚本特征，覆盖 PowerShell 编码执行、下载执行、进程注入、持久化，VBScript/JavaScript WSH 危险对象调用，Batch 下载器/持久化命令，以及 Base64/字符串拆分/反射加载等混淆技术
 - **信任区管理** — 支持按文件路径、文件夹路径、MD5 值添加信任白名单，优先于黑名单检测
 
 ### 🛡️ 系统安全
@@ -56,6 +57,7 @@ WindowsProject1/
 ├── MD5Hasher.h/cpp         # MD5 哈希计算
 ├── HeuristicEngine.h/cpp   # 启发式引擎（A5 77 B0 特征码检测）
 ├── SignatureEngine.h/cpp   # 数字签名引擎
+├── ScriptAnalyzerEngine.h/cpp # 脚本分析引擎（PS/VBS/JS/BAT/HTA）
 ├── TrustZone.h/cpp         # 信任区管理（SQLite 存储）
 ├── BaselineEngine.h/cpp    # 基线检测引擎
 ├── BaselineCommon.h/cpp    # 基线检测公共定义

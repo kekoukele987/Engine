@@ -57,6 +57,9 @@
     <ClInclude Include="SignatureEngine.h">
       <Filter>头文件</Filter>
     </ClInclude>
+    <ClInclude Include="ScriptAnalyzerEngine.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="HeuristicEngine.cpp">
@@ -90,6 +93,9 @@
       <Filter>源文件</Filter>
     </ClCompile>
     <ClCompile Include="SignatureEngine.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="ScriptAnalyzerEngine.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
   </ItemGroup>

@@ -161,6 +161,7 @@
     <ClInclude Include="ObjDialog.h" />
     <ClInclude Include="Resource.h" />
     <ClInclude Include="ScanHistory.h" />
+    <ClInclude Include="ScriptAnalyzerEngine.h" />
     <ClInclude Include="Settings.h" />
     <ClInclude Include="SignatureEngine.h" />
     <ClInclude Include="sqlite3.h" />
@@ -191,6 +192,7 @@
     <ClCompile Include="ObjectManager.cpp" />
     <ClCompile Include="ObjDialog.cpp" />
     <ClCompile Include="ScanHistory.cpp" />
+    <ClCompile Include="ScriptAnalyzerEngine.cpp" />
     <ClCompile Include="Settings.cpp" />
     <ClCompile Include="SignatureEngine.cpp" />
     <ClCompile Include="sqlite3.c">
