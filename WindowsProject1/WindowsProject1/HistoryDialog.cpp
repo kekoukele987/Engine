@@ -173,17 +173,23 @@ void HistoryDialog::UpdateList(HWND hWnd)
 
     int index = 0;
     for (const auto& record : records) {
+        // 将临时字符串保存到局部变量，防止悬空指针
+        std::wstring idStr    = std::to_wstring(record.id);
+        std::wstring totalStr = std::to_wstring(record.totalFiles);
+        std::wstring blackStr = std::to_wstring(record.blackFiles);
+        std::wstring whiteStr = std::to_wstring(record.whiteFiles);
+
         item.iItem     = index;
         item.iSubItem  = 0;
-        item.pszText   = const_cast<wchar_t*>(std::to_wstring(record.id).c_str());
+        item.pszText   = const_cast<wchar_t*>(idStr.c_str());
         item.lParam    = record.id;
         ListView_InsertItem(g_hList, &item);
 
         ListView_SetItemText(g_hList, index, 1, const_cast<wchar_t*>(record.scanTime.c_str()));
         ListView_SetItemText(g_hList, index, 2, const_cast<wchar_t*>(record.scanType.c_str()));
-        ListView_SetItemText(g_hList, index, 3, const_cast<wchar_t*>(std::to_wstring(record.totalFiles).c_str()));
-        ListView_SetItemText(g_hList, index, 4, const_cast<wchar_t*>(std::to_wstring(record.blackFiles).c_str()));
-        ListView_SetItemText(g_hList, index, 5, const_cast<wchar_t*>(std::to_wstring(record.whiteFiles).c_str()));
+        ListView_SetItemText(g_hList, index, 3, const_cast<wchar_t*>(totalStr.c_str()));
+        ListView_SetItemText(g_hList, index, 4, const_cast<wchar_t*>(blackStr.c_str()));
+        ListView_SetItemText(g_hList, index, 5, const_cast<wchar_t*>(whiteStr.c_str()));
         index++;
     }
 
