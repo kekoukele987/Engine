@@ -313,8 +313,6 @@ LRESULT CALLBACK HistoryDialog::WndProc(HWND hWnd, UINT message, WPARAM wParam, 
             lx, HEADER_H + 8, lw, lh,
             hWnd, (HMENU)IDC_HIST_LIST, (HINSTANCE)GetWindowLongPtrW(hWnd, GWLP_HINSTANCE), nullptr);
         if (g_hFontBtn) SendMessageW(g_hList, WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
-        SetWindowLongPtrW(g_hList, GWL_STYLE,
-            GetWindowLongPtrW(g_hList, GWL_STYLE) | LVS_OWNERDRAWFIXED);
 
         ListView_SetExtendedListViewStyle(g_hList,
             LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES | LVS_EX_DOUBLEBUFFER);
@@ -435,8 +433,9 @@ LRESULT CALLBACK HistoryDialog::WndProc(HWND hWnd, UINT message, WPARAM wParam, 
                 auto* lpcd = reinterpret_cast<NMLVCUSTOMDRAW*>(lParam);
                 switch (lpcd->nmcd.dwDrawStage) {
                 case CDDS_PREPAINT:
-                    return CDRF_NOTIFYITEMDRAW;
+                    return CDRF_NOTIFYSUBITEMDRAW;
                 case CDDS_ITEMPREPAINT:
+                case CDDS_ITEMPREPAINT | CDDS_SUBITEM:
                     lpcd->clrText   = CLR_LIST_TXT;
                     lpcd->clrTextBk = (lpcd->nmcd.uItemState & CDIS_SELECTED)
                                       ? CLR_ACCENT : CLR_LIST_BG;

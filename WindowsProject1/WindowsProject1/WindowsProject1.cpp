@@ -1148,6 +1148,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             break;
 
         case IDC_BTN_SCAN_HISTORY:
+            ScanHistory::Instance().Initialize(ComputeDataDir());
             HistoryDialog::Show(hWnd);
             break;
 
