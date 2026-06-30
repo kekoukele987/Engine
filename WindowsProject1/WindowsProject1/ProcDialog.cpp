@@ -85,6 +85,7 @@ void ProcDialog::Show(HWND hParent) {
         MSG msg;
         while (IsWindow(hWnd) && GetMessage(&msg, nullptr, 0, 0)) { TranslateMessage(&msg); DispatchMessage(&msg); }
         UnregisterClassW(cls, (HINSTANCE)GetWindowLongPtrW(hParent, GWLP_HINSTANCE));
+        SetForegroundWindow(hParent);
     }
 }
 

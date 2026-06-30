@@ -100,6 +100,7 @@ void StartupDialog::Show(HWND hParent)
             DispatchMessage(&msg);
         }
         UnregisterClassW(kClassName, (HINSTANCE)GetWindowLongPtrW(hParent, GWLP_HINSTANCE));
+        SetForegroundWindow(hParent);
     }
 }
 

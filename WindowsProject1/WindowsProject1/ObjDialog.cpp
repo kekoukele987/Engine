@@ -70,7 +70,7 @@ void ObjDialog::Show(HWND hParent) {
     wc.hCursor = LoadCursor(nullptr, IDC_ARROW); wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
     wc.lpszClassName = cls; RegisterClassExW(&wc);
     HWND hWnd = CreateWindowExW(0, cls, Txt().winTitle, WS_OVERLAPPEDWINDOW & ~WS_MAXIMIZEBOX & ~WS_THICKFRAME, CW_USEDEFAULT, CW_USEDEFAULT, 750, 500, hParent, nullptr, (HINSTANCE)GetWindowLongPtrW(hParent, GWLP_HINSTANCE), nullptr);
-    if (hWnd) { ShowWindow(hWnd, SW_SHOW); SetForegroundWindow(hWnd); MSG msg; while (IsWindow(hWnd) && GetMessage(&msg, nullptr, 0, 0)) { TranslateMessage(&msg); DispatchMessage(&msg); } UnregisterClassW(cls, (HINSTANCE)GetWindowLongPtrW(hParent, GWLP_HINSTANCE)); }
+    if (hWnd) { ShowWindow(hWnd, SW_SHOW); SetForegroundWindow(hWnd); MSG msg; while (IsWindow(hWnd) && GetMessage(&msg, nullptr, 0, 0)) { TranslateMessage(&msg); DispatchMessage(&msg); } UnregisterClassW(cls, (HINSTANCE)GetWindowLongPtrW(hParent, GWLP_HINSTANCE)); SetForegroundWindow(hParent); }
 }
 
 LRESULT CALLBACK ObjDialog::WndProc(HWND hWnd, UINT msg, WPARAM w, LPARAM l) {

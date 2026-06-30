@@ -125,8 +125,8 @@ void BaselineDialog::Show(HWND hParent)
             DispatchMessage(&msg);
         }
 
-        // Cleanup class
         UnregisterClassW(kClassName, (HINSTANCE)GetWindowLongPtrW(hParent, GWLP_HINSTANCE));
+        SetForegroundWindow(hParent);
     }
 }
 

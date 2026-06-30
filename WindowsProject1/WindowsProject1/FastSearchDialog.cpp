@@ -111,6 +111,7 @@ void FastSearchDialog::Show(HWND hParent)
             TranslateMessage(&msg); DispatchMessage(&msg);
         }
         UnregisterClassW(cls, (HINSTANCE)GetWindowLongPtrW(hParent, GWLP_HINSTANCE));
+        SetForegroundWindow(hParent);
     }
 }
 

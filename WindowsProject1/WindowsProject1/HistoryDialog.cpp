@@ -153,6 +153,7 @@ void HistoryDialog::Show(HWND hParent)
         }
 
         UnregisterClassW(kClassName, (HINSTANCE)GetWindowLongPtrW(hParent, GWLP_HINSTANCE));
+        SetForegroundWindow(hParent);
     }
 }
 
