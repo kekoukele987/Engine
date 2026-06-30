@@ -1,6 +1,7 @@
 #include "framework.h"
 #include "ObjDialog.h"
 #include <commctrl.h>
+#include <map>
 
 #pragma comment(lib, "Comctl32.lib")
 
@@ -26,6 +27,42 @@ HFONT   ObjDialog::g_hFont      = nullptr;
 
 static const ObjDialogTexts kZH = { L"对象管理器", L"名称", L"类型", L"路径", L"刷新", L"关闭", L"正在加载...", L"已加载 %d 个对象" };
 static const ObjDialogTexts kEN = { L"Object Manager", L"Name", L"Type", L"Path", L"Refresh", L"Close", L"Loading...", L"%d objects loaded" };
+
+// 对象类型名中英文映射
+static const wchar_t* TranslateTypeName(const std::wstring& engType) {
+    if (Settings::Instance().GetLang() != AppLang::Chinese) return engType.c_str();
+    static const std::map<std::wstring, const wchar_t*> s_typeMap = {
+        { L"Directory",        L"目录" },
+        { L"SymbolicLink",     L"符号链接" },
+        { L"Key",              L"注册表项" },
+        { L"Event",            L"事件" },
+        { L"Mutant",           L"互斥体" },
+        { L"Section",          L"内存区段" },
+        { L"Device",           L"设备" },
+        { L"File",             L"文件" },
+        { L"Process",          L"进程" },
+        { L"Thread",           L"线程" },
+        { L"Token",            L"令牌" },
+        { L"Job",              L"作业" },
+        { L"Timer",            L"定时器" },
+        { L"WindowStation",    L"窗口站" },
+        { L"Desktop",          L"桌面" },
+        { L"EventPair",        L"事件对" },
+        { L"Controller",       L"控制器" },
+        { L"Profile",          L"性能配置文件" },
+        { L"Type",             L"类型对象" },
+        { L"KeyedEvent",       L"键控事件" },
+        { L"Callback",         L"回调" },
+        { L"Adapter",          L"适配器" },
+        { L"Port",             L"端口" },
+        { L"ALPC Port",        L"ALPC 端口" },
+        { L"IRTimer",          L"IR 定时器" },
+        { L"WaitCompletion",   L"等待完成包" },
+        { L"SynchronizationEvent", L"同步事件" },
+    };
+    auto it = s_typeMap.find(engType);
+    return (it != s_typeMap.end()) ? it->second : engType.c_str();
+}
 
 const ObjDialogTexts& ObjDialog::Txt() {
     return Settings::Instance().GetLang() == AppLang::Chinese ? kZH : kEN;
@@ -56,7 +93,9 @@ void ObjDialog::Browse(HWND hWnd, const std::wstring& path) {
 
     auto entries = ObjectManager::EnumDirectory(path);
     for (auto& e : entries) {
-        AddTreeItem(g_hTree, nullptr, e.name.c_str(), e.typeName.c_str(), (LPARAM)e.isDirectory);
+        // 使用 TranslateTypeName 将内核返回的英文类型名转为中文
+        const wchar_t* localizedType = TranslateTypeName(e.typeName);
+        AddTreeItem(g_hTree, nullptr, e.name.c_str(), localizedType, (LPARAM)e.isDirectory);
     }
 
     wchar_t s[256]; swprintf_s(s, Txt().status, (int)entries.size());
