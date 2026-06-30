@@ -245,7 +245,7 @@ ATOM MyRegisterClass(HINSTANCE hInstance)
     wcex.hIcon         = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_WINDOWSPROJECT1));
     wcex.hCursor       = LoadCursor(nullptr, IDC_ARROW);
     wcex.hbrBackground = g_hBrushBg;
-    wcex.lpszMenuName  = MAKEINTRESOURCEW(IDC_WINDOWSPROJECT1);
+    wcex.lpszMenuName  = nullptr;  // 移除菜单
     wcex.lpszClassName = szWindowClass;
     wcex.hIconSm       = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_SMALL));
     ATOM a = RegisterClassExW(&wcex);
