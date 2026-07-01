@@ -218,6 +218,15 @@ void Quarantine::LoadRecords()
     std::ifstream f(m_recordFile);
     if (!f.is_open()) return;
 
+    // 检测并跳过 UTF-8 BOM (0xEF 0xBB 0xBF)
+    char bom[3] = {};
+    f.read(bom, 3);
+    if (bom[0] != '\xEF' || bom[1] != '\xBB' || bom[2] != '\xBF') {
+        // 没有 BOM，回退到文件起始位置
+        f.clear();
+        f.seekg(0);
+    }
+
     std::string line;
     while (std::getline(f, line)) {
         // 跳过空行和注释

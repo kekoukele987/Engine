@@ -63,6 +63,9 @@
     <ClInclude Include="Quarantine.h">
       <Filter>头文件</Filter>
     </ClInclude>
+    <ClInclude Include="QuarantineDialog.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="HeuristicEngine.cpp">
@@ -102,6 +105,9 @@
       <Filter>源文件</Filter>
     </ClCompile>
     <ClCompile Include="Quarantine.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="QuarantineDialog.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
   </ItemGroup>

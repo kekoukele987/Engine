@@ -41,6 +41,13 @@
 #define IDC_BTN_FILE_SEARCH     1036
 #define IDC_BTN_PROC_MGR        1037
 #define IDC_BTN_OBJ_MGR         1038
+#define IDC_BTN_QUARANTINE      1039
+#define IDC_QUAR_LIST           2020
+#define IDC_BTN_RESTORE_FILE    2021
+#define IDC_BTN_DELETE_FILE     2022
+#define IDC_BTN_CLEAR_QUAR      2023
+#define IDC_BTN_QUAR_CLOSE      2024
+#define IDC_QUAR_STATUS         2025
 
 // 历史记录对话框
 #define IDD_HISTORY_DIALOG      2000

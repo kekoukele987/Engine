@@ -16,6 +16,7 @@
 #include "ScanHistory.h"
 #include "BaselineDialog.h"
 #include "Quarantine.h"
+#include "QuarantineDialog.h"
 #include <commdlg.h>
 #include <shlobj.h>
 #include <string>
@@ -50,6 +51,7 @@ struct LangStrings {
     const wchar_t* fileSearcher;
     const wchar_t* procManager;
     const wchar_t* objManager;
+    const wchar_t* quarantineMgr;
 };
 
 static const LangStrings kLang[] = {
@@ -63,7 +65,8 @@ static const LangStrings kLang[] = {
         L"启动项管理",
         L"文件搜索",
         L"进程管理",
-        L"对象管理"
+        L"对象管理",
+        L"隔离区管理"
     },
     {
         L"Engine  Antivirus",
@@ -75,7 +78,8 @@ static const LangStrings kLang[] = {
         L"Startup Manager",
         L"File Search",
         L"Process Manager",
-        L"Object Manager"
+        L"Object Manager",
+        L"Quarantine"
     },
 };
 static const LangStrings& Str() { return kLang[(int)Settings::Instance().GetLang()]; }
@@ -120,6 +124,7 @@ HWND hBtnStartup       = nullptr;
 HWND hBtnFileSearch    = nullptr;
 HWND hBtnProcMgr      = nullptr;
 HWND hBtnObjMgr       = nullptr;
+HWND hBtnQuarantine   = nullptr;
 
 static HWND g_hHistoryDlg = nullptr;
 
@@ -571,6 +576,7 @@ static void ApplyLanguage(HWND hMainWnd)
     if (hBtnStartup) SetWindowTextW(hBtnStartup, Str().startupManager);
     if (hBtnFileSearch) SetWindowTextW(hBtnFileSearch, Str().fileSearcher);
     if (hBtnProcMgr) SetWindowTextW(hBtnProcMgr, Str().procManager);
+    if (hBtnQuarantine) SetWindowTextW(hBtnQuarantine, Str().quarantineMgr);
     InvalidateRect(hMainWnd, nullptr, TRUE);
     // Settings dialog: repaint header title + option buttons
     if (g_hSettingsDlg) {
@@ -888,6 +894,10 @@ static void RepositionButtons(HWND hWnd)
     sp(hBtnFileSearch,  sx + (BTN_W + BTN_GAP),                     yStart + (BTN_H + BTN_GAP) * 2);
     sp(hBtnProcMgr,     sx + (BTN_W + BTN_GAP) * 2,                 yStart + (BTN_H + BTN_GAP) * 2);
     sp(hBtnObjMgr,      sx + (BTN_W + BTN_GAP) * 3,                 yStart + (BTN_H + BTN_GAP) * 2);
+    
+    // Row 4 (quarantine center)
+    int qx = sx + (BTN_W + BTN_GAP);  // offset by 1 to center a bit
+    sp(hBtnQuarantine,  qx,                                           yStart + (BTN_H + BTN_GAP) * 3);
 }
 
 // ---------------------------------------------------------------------------
@@ -952,6 +962,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
             0, 0, BTN_W, BTN_H, hWnd, (HMENU)IDC_BTN_OBJ_MGR, hInst, nullptr);
 
+        hBtnQuarantine = CreateWindowW(L"BUTTON", Str().quarantineMgr,
+            WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+            0, 0, BTN_W, BTN_H, hWnd, (HMENU)IDC_BTN_QUARANTINE, hInst, nullptr);
+
         if (g_hFontBtn) {
             SendMessageW(hBtnQuickScan,     WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
             SendMessageW(hBtnCustomScan,    WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
@@ -965,6 +979,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             SendMessageW(hBtnFileSearch,    WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
             SendMessageW(hBtnProcMgr,       WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
             SendMessageW(hBtnObjMgr,        WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
+            SendMessageW(hBtnQuarantine,    WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
         }
         // Apply persisted language so button texts match saved setting on startup
         ApplyLanguage(hWnd);
@@ -1039,6 +1054,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         case IDC_BTN_STARTUP:      clrN = CLR_BTN_CS; clrP = CLR_BTN_CS_P; break;
         case IDC_BTN_FILE_SEARCH:  clrN = CLR_BTN_QS; clrP = CLR_BTN_QS_P; break;
         case IDC_BTN_PROC_MGR:     clrN = CLR_BTN_ST; clrP = CLR_BTN_ST_P; break;
+        case IDC_BTN_QUARANTINE:   clrN = CLR_BTN_TZ; clrP = CLR_BTN_TZ_P; break;
         default:                   clrN = CLR_BTN_DIS; clrP = CLR_BTN_DIS;  break;
         }
         COLORREF fill = disabled ? CLR_BTN_DIS : (pressed ? clrP : clrN);
@@ -1192,6 +1208,14 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
     case IDC_BTN_OBJ_MGR:
         ObjDialog::Show(hWnd);
+        break;
+
+    case IDC_BTN_QUARANTINE:
+        {
+            std::wstring dataDir = ComputeDataDir();
+            Quarantine::Instance().Initialize(dataDir);
+            QuarantineDialog::Show(hWnd);
+        }
         break;
 
     case IDC_BTN_SETTINGS:
