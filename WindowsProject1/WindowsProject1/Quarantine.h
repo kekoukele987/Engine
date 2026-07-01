@@ -2,6 +2,8 @@
 #include <string>
 #include <vector>
 
+struct sqlite3;
+
 // ---------------------------------------------------------------------------
 // 隔离区条目
 // ---------------------------------------------------------------------------
@@ -17,6 +19,7 @@ struct QuarantineEntry {
 // ---------------------------------------------------------------------------
 // Quarantine: 隔离区管理类（单例）
 // 当扫描到黑文件时，将文件移动到隔离区并删除源文件
+// 使用 SQLite 持久化记录
 // ---------------------------------------------------------------------------
 class Quarantine {
 public:
@@ -46,21 +49,18 @@ public:
 
 private:
     Quarantine() = default;
-    ~Quarantine() = default;
+    ~Quarantine();
     Quarantine(const Quarantine&) = delete;
     Quarantine& operator=(const Quarantine&) = delete;
-
-    /// 加载隔离区记录文件
-    void LoadRecords();
-
-    /// 保存隔离区记录文件
-    void SaveRecords() const;
 
     /// 生成唯一隔离文件名
     std::wstring GenerateQuarantineName(const std::wstring& originalPath) const;
 
-    std::wstring              m_quarantineDir;   // 隔离区物理目录
-    std::wstring              m_recordFile;       // 记录文件路径 (quarantine.dat)
-    std::vector<QuarantineEntry> m_entries;
-    int                       m_nextId = 1;
+    /// UTF-8 转换辅助
+    static std::string  WtoU8(const std::wstring& w);
+    static std::wstring U8toW(const char* u8);
+
+    sqlite3*                m_db = nullptr;
+    std::wstring            m_quarantineDir;   // 隔离区物理目录
+    bool                    m_initialized = false;
 };

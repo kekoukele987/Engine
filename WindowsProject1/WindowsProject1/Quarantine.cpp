@@ -1,10 +1,33 @@
 #include "framework.h"
 #include "Quarantine.h"
 #include "Logger.h"
-#include <fstream>
-#include <sstream>
+#include "sqlite3.h"
 #include <shlobj.h>
 #include <ctime>
+
+// ---------------------------------------------------------------------------
+// UTF-8 <-> wstring helpers
+// ---------------------------------------------------------------------------
+
+std::string Quarantine::WtoU8(const std::wstring& w)
+{
+    if (w.empty()) return {};
+    int n = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), -1, nullptr, 0, nullptr, nullptr);
+    if (n <= 1) return {};
+    std::string s(n - 1, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, w.c_str(), -1, &s[0], n, nullptr, nullptr);
+    return s;
+}
+
+std::wstring Quarantine::U8toW(const char* u8)
+{
+    if (!u8 || !*u8) return {};
+    int n = MultiByteToWideChar(CP_UTF8, 0, u8, -1, nullptr, 0);
+    if (n <= 1) return {};
+    std::wstring w(n - 1, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, u8, -1, &w[0], n);
+    return w;
+}
 
 // ---------------------------------------------------------------------------
 // Singleton
@@ -16,20 +39,45 @@ Quarantine& Quarantine::Instance()
     return inst;
 }
 
+Quarantine::~Quarantine()
+{
+    if (m_db) { sqlite3_close(m_db); m_db = nullptr; }
+}
+
 // ---------------------------------------------------------------------------
 // Initialize
 // ---------------------------------------------------------------------------
 
 void Quarantine::Initialize(const std::wstring& dataDir)
 {
-    m_quarantineDir = dataDir + L"quarantine\\";
-    m_recordFile    = m_quarantineDir + L"quarantine.dat";
+    if (m_initialized) return;
+    m_initialized = true;
 
-    // 创建隔离区目录
+    m_quarantineDir = dataDir + L"quarantine\\";
     CreateDirectoryW(m_quarantineDir.c_str(), nullptr);
 
-    // 加载已有记录
-    LoadRecords();
+    // 打开/创建 SQLite 数据库
+    wchar_t absW[MAX_PATH] = {};
+    GetFullPathNameW((m_quarantineDir + L"quarantine.db").c_str(), MAX_PATH, absW, nullptr);
+
+    int rc = sqlite3_open_v2(WtoU8(absW).c_str(), &m_db,
+                             SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nullptr);
+    if (rc != SQLITE_OK) {
+        Logger::Instance().Error(L"隔离区数据库打开失败");
+        return;
+    }
+
+    // 建表（file_size 用 TEXT 存储，兼容旧版 sqlite3）
+    const char* createSQL =
+        "CREATE TABLE IF NOT EXISTS quarantine_files ("
+        "  id              INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  original_path   TEXT    NOT NULL,"
+        "  quarantine_path TEXT    NOT NULL,"
+        "  md5             TEXT    NOT NULL DEFAULT '',"
+        "  quarantine_time TEXT    DEFAULT (datetime('now','localtime')),"
+        "  file_size       TEXT    DEFAULT '0'"
+        ");";
+    sqlite3_exec(m_db, createSQL, nullptr, nullptr, nullptr);
 
     Logger::Instance().Info(L"隔离区初始化完成: " + m_quarantineDir);
 }
@@ -40,11 +88,9 @@ void Quarantine::Initialize(const std::wstring& dataDir)
 
 std::wstring Quarantine::GenerateQuarantineName(const std::wstring& originalPath) const
 {
-    // 提取原文件名（不含路径）
     size_t pos = originalPath.find_last_of(L"\\/");
     std::wstring fileName = (pos != std::wstring::npos) ? originalPath.substr(pos + 1) : originalPath;
 
-    // 在文件名前加入时间戳，避免重名
     time_t now = time(nullptr);
     wchar_t nameBuf[MAX_PATH];
     swprintf_s(nameBuf, L"%08x_%ls", (unsigned int)now, fileName.c_str());
@@ -83,37 +129,55 @@ bool Quarantine::QuarantineFile(const std::wstring& filePath, const std::wstring
         wchar_t errBuf[256];
         swprintf_s(errBuf, L"隔离警告：文件已复制到隔离区但无法删除源文件 (错误=%u) - %ls", err, filePath.c_str());
         Logger::Instance().Warn(errBuf);
-        // 即使删除失败，隔离已经完成，记录继续
     }
 
-    // 填充条目
-    entry.id = m_nextId++;
-    entry.originalPath   = filePath;
-    entry.quarantinePath = qPath;
-    entry.md5            = md5;
-    entry.quarantineTime = []() {
-        time_t now = time(nullptr);
-        struct tm ti;
-        localtime_s(&ti, &now);
-        wchar_t buf[64];
-        swprintf_s(buf, L"%04d-%02d-%02d %02d:%02d:%02d",
-            ti.tm_year + 1900, ti.tm_mon + 1, ti.tm_mday,
-            ti.tm_hour, ti.tm_min, ti.tm_sec);
-        return std::wstring(buf);
-    }();
+    // 获取当前时间字符串
+    time_t now = time(nullptr);
+    struct tm ti;
+    localtime_s(&ti, &now);
+    wchar_t timeBuf[64];
+    swprintf_s(timeBuf, L"%04d-%02d-%02d %02d:%02d:%02d",
+        ti.tm_year + 1900, ti.tm_mon + 1, ti.tm_mday,
+        ti.tm_hour, ti.tm_min, ti.tm_sec);
+    std::wstring timeStr(timeBuf);
 
     LARGE_INTEGER li;
     li.LowPart  = attr.nFileSizeLow;
     li.HighPart = attr.nFileSizeHigh;
-    entry.fileSize = li.QuadPart;
 
-    // 添加到记录列表并保存
-    m_entries.push_back(entry);
-    SaveRecords();
+    // 文件大小转为字符串存储
+    std::wstring sizeStr = std::to_wstring(li.QuadPart);
+
+    // 插入 SQLite
+    int newId = -1;
+    if (m_db) {
+        const char* sql =
+            "INSERT INTO quarantine_files (original_path, quarantine_path, md5, quarantine_time, file_size) "
+            "VALUES (?, ?, ?, ?, ?);";
+        sqlite3_stmt* stmt = nullptr;
+        if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+            sqlite3_bind_text(stmt, 1, WtoU8(filePath).c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(stmt, 2, WtoU8(qPath).c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(stmt, 3, WtoU8(md5).c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(stmt, 4, WtoU8(timeStr).c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(stmt, 5, WtoU8(sizeStr).c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_step(stmt);
+            sqlite3_finalize(stmt);
+            newId = static_cast<int>(sqlite3_last_insert_rowid(m_db));
+        }
+    }
+
+    // 填充条目
+    entry.id              = newId;
+    entry.originalPath    = filePath;
+    entry.quarantinePath  = qPath;
+    entry.md5             = md5;
+    entry.quarantineTime  = timeStr;
+    entry.fileSize        = li.QuadPart;
 
     wchar_t logBuf[512];
-    swprintf_s(logBuf, L"文件已隔离: %ls -> %ls (MD5: %ls)",
-        filePath.c_str(), qPath.c_str(), md5.c_str());
+    swprintf_s(logBuf, L"文件已隔离(ID=%d): %ls -> %ls (MD5: %ls)",
+        newId, filePath.c_str(), qPath.c_str(), md5.c_str());
     Logger::Instance().Info(logBuf);
 
     return true;
@@ -125,33 +189,54 @@ bool Quarantine::QuarantineFile(const std::wstring& filePath, const std::wstring
 
 bool Quarantine::RestoreFile(int id)
 {
-    for (size_t i = 0; i < m_entries.size(); ++i) {
-        if (m_entries[i].id == id) {
-            // 从隔离区复制回原始位置
-            if (!CopyFileW(m_entries[i].quarantinePath.c_str(), m_entries[i].originalPath.c_str(), FALSE)) {
-                DWORD err = GetLastError();
-                wchar_t errBuf[256];
-                swprintf_s(errBuf, L"恢复失败：无法从隔离区复制文件 (错误=%u)", err);
-                Logger::Instance().Error(errBuf);
-                return false;
-            }
+    if (!m_db) return false;
 
-            // 删除隔离区文件
-            ::DeleteFileW(m_entries[i].quarantinePath.c_str());
+    // 查询要恢复的记录
+    const char* selectSQL = "SELECT original_path, quarantine_path FROM quarantine_files WHERE id = ?;";
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(m_db, selectSQL, -1, &stmt, nullptr) != SQLITE_OK) return false;
 
-            // 从记录中移除
-            m_entries.erase(m_entries.begin() + i);
-            SaveRecords();
+    sqlite3_bind_int(stmt, 1, id);
+    bool found = false;
+    std::wstring origPath, quarPath;
 
-            Logger::Instance().Info(L"文件已从隔离区恢复");
-            return true;
-        }
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        origPath = U8toW(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0)));
+        quarPath = U8toW(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1)));
+        found = true;
+    }
+    sqlite3_finalize(stmt);
+
+    if (!found) {
+        wchar_t errBuf[128];
+        swprintf_s(errBuf, L"恢复失败：未找到隔离区条目 ID=%d", id);
+        Logger::Instance().Error(errBuf);
+        return false;
     }
 
-    wchar_t errBuf[128];
-    swprintf_s(errBuf, L"恢复失败：未找到隔离区条目 ID=%d", id);
-    Logger::Instance().Error(errBuf);
-    return false;
+    // 从隔离区复制回原始位置
+    if (!CopyFileW(quarPath.c_str(), origPath.c_str(), FALSE)) {
+        DWORD err = GetLastError();
+        wchar_t errBuf[256];
+        swprintf_s(errBuf, L"恢复失败：无法从隔离区复制文件 (错误=%u)", err);
+        Logger::Instance().Error(errBuf);
+        return false;
+    }
+
+    // 删除隔离区文件
+    ::DeleteFileW(quarPath.c_str());
+
+    // 删除数据库记录
+    const char* delSQL = "DELETE FROM quarantine_files WHERE id = ?;";
+    sqlite3_stmt* delStmt = nullptr;
+    if (sqlite3_prepare_v2(m_db, delSQL, -1, &delStmt, nullptr) == SQLITE_OK) {
+        sqlite3_bind_int(delStmt, 1, id);
+        sqlite3_step(delStmt);
+        sqlite3_finalize(delStmt);
+    }
+
+    Logger::Instance().Info(L"文件已从隔离区恢复 ID=" + std::to_wstring(id));
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -160,24 +245,44 @@ bool Quarantine::RestoreFile(int id)
 
 bool Quarantine::DeleteFile(int id)
 {
-    for (size_t i = 0; i < m_entries.size(); ++i) {
-        if (m_entries[i].id == id) {
-            // 删除隔离区中的文件
-            ::DeleteFileW(m_entries[i].quarantinePath.c_str());
+    if (!m_db) return false;
 
-            // 从记录中移除
-            m_entries.erase(m_entries.begin() + i);
-            SaveRecords();
+    // 查询隔离路径
+    const char* selectSQL = "SELECT quarantine_path FROM quarantine_files WHERE id = ?;";
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(m_db, selectSQL, -1, &stmt, nullptr) != SQLITE_OK) return false;
 
-            Logger::Instance().Info(L"隔离区文件已永久删除");
-            return true;
-        }
+    sqlite3_bind_int(stmt, 1, id);
+    bool found = false;
+    std::wstring quarPath;
+
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        quarPath = U8toW(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0)));
+        found = true;
+    }
+    sqlite3_finalize(stmt);
+
+    if (!found) {
+        wchar_t errBuf[128];
+        swprintf_s(errBuf, L"删除失败：未找到隔离区条目 ID=%d", id);
+        Logger::Instance().Error(errBuf);
+        return false;
     }
 
-    wchar_t errBuf[128];
-    swprintf_s(errBuf, L"删除失败：未找到隔离区条目 ID=%d", id);
-    Logger::Instance().Error(errBuf);
-    return false;
+    // 删除隔离区中的文件
+    ::DeleteFileW(quarPath.c_str());
+
+    // 删除数据库记录
+    const char* delSQL = "DELETE FROM quarantine_files WHERE id = ?;";
+    sqlite3_stmt* delStmt = nullptr;
+    if (sqlite3_prepare_v2(m_db, delSQL, -1, &delStmt, nullptr) == SQLITE_OK) {
+        sqlite3_bind_int(delStmt, 1, id);
+        sqlite3_step(delStmt);
+        sqlite3_finalize(delStmt);
+    }
+
+    Logger::Instance().Info(L"隔离区文件已永久删除 ID=" + std::to_wstring(id));
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -186,11 +291,21 @@ bool Quarantine::DeleteFile(int id)
 
 void Quarantine::ClearAll()
 {
-    for (const auto& entry : m_entries) {
-        ::DeleteFileW(entry.quarantinePath.c_str());
+    if (!m_db) return;
+
+    // 查询所有隔离路径
+    const char* selectSQL = "SELECT quarantine_path FROM quarantine_files;";
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(m_db, selectSQL, -1, &stmt, nullptr) == SQLITE_OK) {
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            std::wstring qPath = U8toW(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0)));
+            ::DeleteFileW(qPath.c_str());
+        }
+        sqlite3_finalize(stmt);
     }
-    m_entries.clear();
-    SaveRecords();
+
+    // 清空数据库
+    sqlite3_exec(m_db, "DELETE FROM quarantine_files;", nullptr, nullptr, nullptr);
 
     Logger::Instance().Info(L"隔离区已清空");
 }
@@ -201,94 +316,30 @@ void Quarantine::ClearAll()
 
 std::vector<QuarantineEntry> Quarantine::GetAllEntries() const
 {
-    return m_entries;
-}
+    std::vector<QuarantineEntry> entries;
+    if (!m_db) return entries;
 
-// ---------------------------------------------------------------------------
-// 加载隔离区记录文件
-// 格式（每行，用制表符分隔）：
-//   ID\t原始路径\t隔离路径\tMD5\t隔离时间\t文件大小
-// ---------------------------------------------------------------------------
+    const char* selectSQL =
+        "SELECT id, original_path, quarantine_path, md5, quarantine_time, file_size "
+        "FROM quarantine_files ORDER BY id;";
 
-void Quarantine::LoadRecords()
-{
-    m_entries.clear();
-    m_nextId = 1;
-
-    std::ifstream f(m_recordFile);
-    if (!f.is_open()) return;
-
-    // 检测并跳过 UTF-8 BOM (0xEF 0xBB 0xBF)
-    char bom[3] = {};
-    f.read(bom, 3);
-    if (bom[0] != '\xEF' || bom[1] != '\xBB' || bom[2] != '\xBF') {
-        // 没有 BOM，回退到文件起始位置
-        f.clear();
-        f.seekg(0);
-    }
-
-    std::string line;
-    while (std::getline(f, line)) {
-        // 跳过空行和注释
-        if (line.empty() || line[0] == '#') continue;
-
-        std::istringstream ss(line);
-        std::string token;
-        std::vector<std::string> tokens;
-        while (std::getline(ss, token, '\t')) {
-            tokens.push_back(token);
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(m_db, selectSQL, -1, &stmt, nullptr) == SQLITE_OK) {
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            QuarantineEntry e;
+            e.id              = sqlite3_column_int(stmt, 0);
+            e.originalPath    = U8toW(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1)));
+            e.quarantinePath  = U8toW(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2)));
+            e.md5             = U8toW(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3)));
+            e.quarantineTime  = U8toW(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 4)));
+            // file_size 存储为 TEXT，需要转换
+            const char* sz = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 5));
+            e.fileSize = sz ? _atoi64(sz) : 0;
+            if (!e.originalPath.empty())
+                entries.push_back(e);
         }
-        if (tokens.size() < 6) continue;
-
-        QuarantineEntry entry;
-        entry.id = std::stoi(tokens[0]);
-
-        // 将 UTF-8 字符串转换为宽字符串
-        auto toWide = [](const std::string& s) -> std::wstring {
-            int len = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);
-            std::wstring wstr(len - 1, L'\0');
-            MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, &wstr[0], len);
-            return wstr;
-        };
-
-        entry.originalPath   = toWide(tokens[1]);
-        entry.quarantinePath = toWide(tokens[2]);
-        entry.md5            = toWide(tokens[3]);
-        entry.quarantineTime = toWide(tokens[4]);
-        entry.fileSize       = std::stoll(tokens[5]);
-
-        m_entries.push_back(entry);
-        if (entry.id >= m_nextId)
-            m_nextId = entry.id + 1;
+        sqlite3_finalize(stmt);
     }
-}
 
-// ---------------------------------------------------------------------------
-// 保存隔离区记录文件
-// ---------------------------------------------------------------------------
-
-void Quarantine::SaveRecords() const
-{
-    std::ofstream f(m_recordFile);
-    if (!f.is_open()) return;
-
-    // 写 UTF-8 BOM
-    f << "\xEF\xBB\xBF";
-
-    for (const auto& entry : m_entries) {
-        // 将宽字符串转换为 UTF-8
-        auto toUtf8 = [](const std::wstring& wstr) -> std::string {
-            int len = WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, nullptr, 0, nullptr, nullptr);
-            std::string s(len - 1, '\0');
-            WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, &s[0], len, nullptr, nullptr);
-            return s;
-        };
-
-        f << entry.id << '\t'
-          << toUtf8(entry.originalPath) << '\t'
-          << toUtf8(entry.quarantinePath) << '\t'
-          << toUtf8(entry.md5) << '\t'
-          << toUtf8(entry.quarantineTime) << '\t'
-          << entry.fileSize << '\n';
-    }
+    return entries;
 }
