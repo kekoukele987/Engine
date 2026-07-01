@@ -169,7 +169,6 @@
     <ClInclude Include="SignatureEngine.h" />
     <ClInclude Include="sqlite3.h" />
     <ClInclude Include="targetver.h" />
-    <ClInclude Include="TrustZone.h" />
     <ClInclude Include="WindowsProject1.h" />
     <ClInclude Include="Quarantine.h" />
     <ClInclude Include="TrustHelper.h" />
@@ -208,7 +207,6 @@
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <WarningLevel>TurnOffAllWarnings</WarningLevel>
     </ClCompile>
-    <ClCompile Include="TrustZone.cpp" />
     <ClCompile Include="WindowsProject1.cpp" />
     <ClCompile Include="TrustHelper.cpp" />
     <ClCompile Include="Quarantine.cpp" />
