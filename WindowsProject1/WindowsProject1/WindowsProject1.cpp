@@ -19,6 +19,7 @@
 #include "QuarantineDialog.h"
 #include "ArchiveScanner.h"
 #include "SchedTaskDialog.h"
+#include "EtwDialog.h"
 #include <commdlg.h>
 #include <shlobj.h>
 #include <string>
@@ -128,6 +129,7 @@ HWND hBtnProcMgr      = nullptr;
 HWND hBtnObjMgr       = nullptr;
 HWND hBtnQuarantine   = nullptr;
 HWND hBtnSchedTask    = nullptr;
+HWND hBtnEtw          = nullptr;
 
 static HWND g_hHistoryDlg = nullptr;
 
@@ -955,6 +957,7 @@ static void RepositionButtons(HWND hWnd)
     int qx = sx + (BTN_W + BTN_GAP);
     sp(hBtnQuarantine,  qx,                                           yStart + (BTN_H + BTN_GAP) * 3);
     sp(hBtnSchedTask,   qx + (BTN_W + BTN_GAP),                      yStart + (BTN_H + BTN_GAP) * 3);
+    sp(hBtnEtw,         qx + (BTN_W + BTN_GAP) * 2,                  yStart + (BTN_H + BTN_GAP) * 3);
 }
 
 // ---------------------------------------------------------------------------
@@ -1027,6 +1030,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
             0, 0, BTN_W, BTN_H, hWnd, (HMENU)IDC_BTN_SCHED_TASK, hInst, nullptr);
 
+        hBtnEtw = CreateWindowW(L"BUTTON", L"ETW 监控",
+            WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+            0, 0, BTN_W, BTN_H, hWnd, (HMENU)IDC_BTN_ETW, hInst, nullptr);
+
         if (g_hFontBtn) {
             SendMessageW(hBtnQuickScan,     WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
             SendMessageW(hBtnCustomScan,    WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
@@ -1042,6 +1049,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             SendMessageW(hBtnObjMgr,        WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
             SendMessageW(hBtnQuarantine,    WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
             SendMessageW(hBtnSchedTask,     WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
+            SendMessageW(hBtnEtw,           WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
         }
         // Apply persisted language so button texts match saved setting on startup
         ApplyLanguage(hWnd);
@@ -1118,6 +1126,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         case IDC_BTN_PROC_MGR:     clrN = CLR_BTN_ST; clrP = CLR_BTN_ST_P; break;
         case IDC_BTN_QUARANTINE:   clrN = CLR_BTN_TZ; clrP = CLR_BTN_TZ_P; break;
         case IDC_BTN_SCHED_TASK:   clrN = CLR_BTN_QS; clrP = CLR_BTN_QS_P; break;
+        case IDC_BTN_ETW:          clrN = CLR_BTN_ST; clrP = CLR_BTN_ST_P; break;
         default:                   clrN = CLR_BTN_DIS; clrP = CLR_BTN_DIS;  break;
         }
         COLORREF fill = disabled ? CLR_BTN_DIS : (pressed ? clrP : clrN);
@@ -1283,6 +1292,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
     case IDC_BTN_SCHED_TASK:
         SchedTaskDialog::Show(hWnd);
+        break;
+
+    case IDC_BTN_ETW:
+        EtwDialog::Show(hWnd);
         break;
 
     case IDC_BTN_SETTINGS:

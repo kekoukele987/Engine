@@ -53,6 +53,12 @@
 #define IDC_BTN_SCHED_REFRESH   2031
 #define IDC_BTN_SCHED_CLOSE     2032
 #define IDC_SCHED_STATUS        2033
+#define IDC_BTN_ETW             1041
+#define IDC_ETW_LIST            2050
+#define IDC_BTN_ETW_START       2051
+#define IDC_BTN_ETW_STOP        2052
+#define IDC_BTN_ETW_CLOSE       2053
+#define IDC_ETW_STATUS          2054
 
 // 历史记录对话框
 #define IDD_HISTORY_DIALOG      2000

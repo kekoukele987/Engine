@@ -175,6 +175,7 @@
     <ClInclude Include="QuarantineDialog.h" />
     <ClInclude Include="ArchiveScanner.h" />
     <ClInclude Include="SchedTaskDialog.h" />
+    <ClInclude Include="EtwDialog.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="BaselineCommon.cpp" />
@@ -213,6 +214,7 @@
     <ClCompile Include="QuarantineDialog.cpp" />
     <ClCompile Include="ArchiveScanner.cpp" />
     <ClCompile Include="SchedTaskDialog.cpp" />
+    <ClCompile Include="EtwDialog.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="data\black.dat" />
