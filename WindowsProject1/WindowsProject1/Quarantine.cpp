@@ -4,6 +4,61 @@
 #include "sqlite3.h"
 #include <shlobj.h>
 #include <ctime>
+#include <vector>
+
+// ---------------------------------------------------------------------------
+// XOR 加密 / 解密密钥（简单的字节异或，防止直接打开隔离文件）
+// ---------------------------------------------------------------------------
+static const BYTE kXorKey[] = {
+    0xA5, 0x77, 0xB0, 0x3C, 0x1E, 0x6F, 0x8D, 0x42,
+    0xE9, 0x53, 0x7A, 0xC1, 0x4F, 0x28, 0x96, 0xDB
+};
+static const int kXorKeyLen = sizeof(kXorKey);
+
+// ---------------------------------------------------------------------------
+// 对缓冲区进行原地 XOR 加/解密（异或两次即还原）
+// ---------------------------------------------------------------------------
+static void XorBuffer(BYTE* buf, DWORD size)
+{
+    for (DWORD i = 0; i < size; ++i)
+        buf[i] ^= kXorKey[i % kXorKeyLen];
+}
+
+// ---------------------------------------------------------------------------
+// 对文件进行 XOR 加/解密（原地操作）
+// ---------------------------------------------------------------------------
+static bool XorFile(const std::wstring& filePath)
+{
+    HANDLE hFile = CreateFileW(filePath.c_str(), GENERIC_READ | GENERIC_WRITE,
+                               FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+                               FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (hFile == INVALID_HANDLE_VALUE) return false;
+
+    DWORD size = GetFileSize(hFile, nullptr);
+    if (size == 0 || size == INVALID_FILE_SIZE) {
+        CloseHandle(hFile);
+        return size == 0; // 空文件也算成功
+    }
+
+    // 分配缓冲区并读取
+    std::vector<BYTE> buf(size);
+    DWORD read = 0;
+    if (!ReadFile(hFile, buf.data(), size, &read, nullptr) || read != size) {
+        CloseHandle(hFile);
+        return false;
+    }
+
+    // XOR 加/解密
+    XorBuffer(buf.data(), size);
+
+    // 写回
+    SetFilePointer(hFile, 0, nullptr, FILE_BEGIN);
+    DWORD written = 0;
+    BOOL ok = WriteFile(hFile, buf.data(), size, &written, nullptr);
+    CloseHandle(hFile);
+
+    return ok && written == size;
+}
 
 // ---------------------------------------------------------------------------
 // UTF-8 <-> wstring helpers
@@ -123,6 +178,9 @@ bool Quarantine::QuarantineFile(const std::wstring& filePath, const std::wstring
         return false;
     }
 
+    // 对隔离区文件进行 XOR 加密，防止直接打开
+    XorFile(qPath);
+
     // 复制成功后，删除源文件
     if (!::DeleteFileW(filePath.c_str())) {
         DWORD err = GetLastError();
@@ -213,6 +271,9 @@ bool Quarantine::RestoreFile(int id)
         Logger::Instance().Error(errBuf);
         return false;
     }
+
+    // 对隔离区文件进行 XOR 解密（异或两次即还原）
+    XorFile(quarPath);
 
     // 从隔离区复制回原始位置
     if (!CopyFileW(quarPath.c_str(), origPath.c_str(), FALSE)) {
