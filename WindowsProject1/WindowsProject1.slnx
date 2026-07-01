@@ -4,4 +4,5 @@
     <Platform Name="x86" />
   </Configurations>
   <Project Path="WindowsProject1/WindowsProject1.vcxproj" Id="07c323b8-0ad0-4423-be00-d0bc48f3aa1a" />
+  <Project Path="TrustZoneDll/TrustZoneDll.vcxproj" Id="07c323b8-0ad0-4423-be00-d0bc48f3aa2b" />
 </Solution>
