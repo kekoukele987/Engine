@@ -48,6 +48,11 @@
 #define IDC_BTN_CLEAR_QUAR      2023
 #define IDC_BTN_QUAR_CLOSE      2024
 #define IDC_QUAR_STATUS         2025
+#define IDC_BTN_SCHED_TASK      1040
+#define IDC_SCHED_LIST          2030
+#define IDC_BTN_SCHED_REFRESH   2031
+#define IDC_BTN_SCHED_CLOSE     2032
+#define IDC_SCHED_STATUS        2033
 
 // 历史记录对话框
 #define IDD_HISTORY_DIALOG      2000

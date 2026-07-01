@@ -18,6 +18,7 @@
 #include "Quarantine.h"
 #include "QuarantineDialog.h"
 #include "ArchiveScanner.h"
+#include "SchedTaskDialog.h"
 #include <commdlg.h>
 #include <shlobj.h>
 #include <string>
@@ -126,6 +127,7 @@ HWND hBtnFileSearch    = nullptr;
 HWND hBtnProcMgr      = nullptr;
 HWND hBtnObjMgr       = nullptr;
 HWND hBtnQuarantine   = nullptr;
+HWND hBtnSchedTask    = nullptr;
 
 static HWND g_hHistoryDlg = nullptr;
 
@@ -949,9 +951,10 @@ static void RepositionButtons(HWND hWnd)
     sp(hBtnProcMgr,     sx + (BTN_W + BTN_GAP) * 2,                 yStart + (BTN_H + BTN_GAP) * 2);
     sp(hBtnObjMgr,      sx + (BTN_W + BTN_GAP) * 3,                 yStart + (BTN_H + BTN_GAP) * 2);
     
-    // Row 4 (quarantine center)
-    int qx = sx + (BTN_W + BTN_GAP);  // offset by 1 to center a bit
+    // Row 4
+    int qx = sx + (BTN_W + BTN_GAP);
     sp(hBtnQuarantine,  qx,                                           yStart + (BTN_H + BTN_GAP) * 3);
+    sp(hBtnSchedTask,   qx + (BTN_W + BTN_GAP),                      yStart + (BTN_H + BTN_GAP) * 3);
 }
 
 // ---------------------------------------------------------------------------
@@ -1020,6 +1023,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
             0, 0, BTN_W, BTN_H, hWnd, (HMENU)IDC_BTN_QUARANTINE, hInst, nullptr);
 
+        hBtnSchedTask = CreateWindowW(L"BUTTON", L"计划任务管理",
+            WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+            0, 0, BTN_W, BTN_H, hWnd, (HMENU)IDC_BTN_SCHED_TASK, hInst, nullptr);
+
         if (g_hFontBtn) {
             SendMessageW(hBtnQuickScan,     WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
             SendMessageW(hBtnCustomScan,    WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
@@ -1034,6 +1041,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             SendMessageW(hBtnProcMgr,       WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
             SendMessageW(hBtnObjMgr,        WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
             SendMessageW(hBtnQuarantine,    WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
+            SendMessageW(hBtnSchedTask,     WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
         }
         // Apply persisted language so button texts match saved setting on startup
         ApplyLanguage(hWnd);
@@ -1109,6 +1117,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         case IDC_BTN_FILE_SEARCH:  clrN = CLR_BTN_QS; clrP = CLR_BTN_QS_P; break;
         case IDC_BTN_PROC_MGR:     clrN = CLR_BTN_ST; clrP = CLR_BTN_ST_P; break;
         case IDC_BTN_QUARANTINE:   clrN = CLR_BTN_TZ; clrP = CLR_BTN_TZ_P; break;
+        case IDC_BTN_SCHED_TASK:   clrN = CLR_BTN_QS; clrP = CLR_BTN_QS_P; break;
         default:                   clrN = CLR_BTN_DIS; clrP = CLR_BTN_DIS;  break;
         }
         COLORREF fill = disabled ? CLR_BTN_DIS : (pressed ? clrP : clrN);
@@ -1270,6 +1279,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             Quarantine::Instance().Initialize(dataDir);
             QuarantineDialog::Show(hWnd);
         }
+        break;
+
+    case IDC_BTN_SCHED_TASK:
+        SchedTaskDialog::Show(hWnd);
         break;
 
     case IDC_BTN_SETTINGS:
