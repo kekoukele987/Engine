@@ -2,7 +2,7 @@
 #include <windows.h>
 #include <string>
 #include <vector>
-#include "ITrust.h"
+#include "../TrustZoneDll/ITrust.h"
 
 // ---------------------------------------------------------------------------
 // TrustHelper: 信任区 DLL 封装

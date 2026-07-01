@@ -172,7 +172,6 @@
     <ClInclude Include="WindowsProject1.h" />
     <ClInclude Include="Quarantine.h" />
     <ClInclude Include="TrustHelper.h" />
-    <ClInclude Include="ITrust.h" />
     <ClInclude Include="QuarantineDialog.h" />
     <ClInclude Include="ArchiveScanner.h" />
   </ItemGroup>

@@ -20,7 +20,7 @@ TrustHelper::~TrustHelper()
 {
     if (m_pTrust) {
         // 通过函数指针调用 DestroyTrust
-        typedef void (__cdecl* FnDestroy)(ITrust*);
+        typedef void (__stdcall* FnDestroy)(ITrust*);
         FnDestroy fn = (FnDestroy)GetProcAddress(m_hDll, "DestroyTrust");
         if (fn) fn(m_pTrust);
         m_pTrust = nullptr;
