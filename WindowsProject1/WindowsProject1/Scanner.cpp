@@ -3,7 +3,7 @@
 #include "HeuristicEngine.h"
 #include "SignatureEngine.h"
 #include "ScriptAnalyzerEngine.h"
-#include "TrustZone.h"
+#include "TrustHelper.h"
 #include "Logger.h"
 #include <fstream>
 #include <set>
@@ -63,10 +63,10 @@ ScanReport Scanner::ScanFile(const std::wstring& filePath)
     r.result = ScanResult::Unknown;
 
     std::wstring dir = DataDir();
-    TrustZone::Instance().Load(dir);
+    TrustHelper::Instance().Initialize(dir);
 
     // Stage 1: path / folder trust (no MD5 calc needed)
-    if (TrustZone::Instance().IsTrusted(filePath)) {
+    if (TrustHelper::Instance().IsTrusted(filePath)) {
         r.result = ScanResult::White;
         return r;
     }
@@ -75,7 +75,7 @@ ScanReport Scanner::ScanFile(const std::wstring& filePath)
     if (r.md5.empty()) return r;
 
     // Stage 2: MD5 trust overrides blacklist
-    if (TrustZone::Instance().IsTrusted(filePath, r.md5)) {
+    if (TrustHelper::Instance().IsTrusted(filePath, r.md5)) {
         r.result = ScanResult::White;
         return r;
     }
@@ -197,7 +197,7 @@ void Scanner::ScanDirectory(
         if (onProgress) onProgress(filePath, total + 1);
 
         // Stage 1: path / folder trust (skip MD5 calc)
-        if (TrustZone::Instance().IsTrusted(filePath)) {
+        if (TrustHelper::Instance().IsTrusted(filePath)) {
             ++stats.white;
             continue;
         }
@@ -205,7 +205,7 @@ void Scanner::ScanDirectory(
         std::string md5 = MD5Hasher::HashFile(filePath);
         if (md5.empty()) {
             ++stats.errors;
-        } else if (TrustZone::Instance().IsTrusted(filePath, md5)) {
+        } else if (TrustHelper::Instance().IsTrusted(filePath, md5)) {
             // Stage 2: MD5 trust overrides blacklist
             ++stats.white;
         } else if (black.count(md5)) {
@@ -286,7 +286,7 @@ QuickScanStats Scanner::QuickScan(ProgressFn onProgress, int threadCount)
 #endif
 
     std::wstring dir = DataDir();
-    TrustZone::Instance().Load(dir);
+    TrustHelper::Instance().Initialize(dir);
     auto black = LoadList(dir + L"black.dat");
     auto white  = LoadList(dir + L"white.dat");
 

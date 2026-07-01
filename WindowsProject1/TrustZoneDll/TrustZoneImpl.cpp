@@ -233,8 +233,6 @@ std::vector<TrustEntry> TrustZoneImpl::GetEntries() const
 // DLL 导出：CreateTrust / DestroyTrust
 // ---------------------------------------------------------------------------
 
-extern "C" {
-
 __declspec(dllexport) ITrust* __stdcall CreateTrust()
 {
     return new TrustZoneImpl();
@@ -243,6 +241,4 @@ __declspec(dllexport) ITrust* __stdcall CreateTrust()
 __declspec(dllexport) void __stdcall DestroyTrust(ITrust* p)
 {
     delete p;
-}
-
 }

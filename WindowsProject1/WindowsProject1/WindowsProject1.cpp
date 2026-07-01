@@ -10,7 +10,7 @@
 #include "FastSearchDialog.h"
 #include "ProcDialog.h"
 #include "ObjDialog.h"
-#include "TrustZone.h"
+#include "TrustHelper.h"
 #include "Settings.h"
 #include "Logger.h"
 #include "ScanHistory.h"
@@ -402,7 +402,7 @@ LRESULT CALLBACK TrustZoneDlgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM
         mkBtn2(L"移除选中", 10,      160, IDC_BTN_REMOVE_TRUST);
         mkBtn2(L"关闭",     w - 116, 106, IDCANCEL);
 
-        for (auto& e : TrustZone::Instance().GetEntries())
+        for (auto& e : TrustHelper::Instance().GetEntries())
             TrustListAddEntry(hList, e);
         break;
     }
@@ -492,7 +492,7 @@ LRESULT CALLBACK TrustZoneDlgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM
         if (id == IDC_BTN_ADD_TRUST) {
             std::wstring file = OpenFileDlg(hWnd);
             if (!file.empty()) {
-                int newId = TrustZone::Instance().AddEntry(file, TrustType::File);
+                int newId = TrustHelper::Instance().AddEntry(file, TrustType::File);
                 if (newId < 0)
                     MessageBoxW(hWnd, L"该文件已在信任区中。", L"提示", MB_OK|MB_ICONINFORMATION);
                 else
@@ -502,7 +502,7 @@ LRESULT CALLBACK TrustZoneDlgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM
         } else if (id == IDC_BTN_ADD_TRUST_FOLDER) {
             std::wstring folder = OpenFolderDlg(hWnd);
             if (!folder.empty()) {
-                int newId = TrustZone::Instance().AddEntry(folder, TrustType::Folder);
+                int newId = TrustHelper::Instance().AddEntry(folder, TrustType::Folder);
                 if (newId < 0)
                     MessageBoxW(hWnd, L"该文件夹已在信任区中。", L"提示", MB_OK|MB_ICONINFORMATION);
                 else
@@ -519,7 +519,7 @@ LRESULT CALLBACK TrustZoneDlgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM
                     break;
                 }
                 std::wstring wmd5(md5.begin(), md5.end());
-                int newId = TrustZone::Instance().AddEntry(wmd5, TrustType::MD5);
+                int newId = TrustHelper::Instance().AddEntry(wmd5, TrustType::MD5);
                 if (newId < 0)
                     MessageBoxW(hWnd, L"该MD5已在信任区中。", L"提示", MB_OK|MB_ICONINFORMATION);
                 else
@@ -533,7 +533,7 @@ LRESULT CALLBACK TrustZoneDlgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM
                 break;
             }
             int entryId = (int)SendMessageW(hList, LB_GETITEMDATA, sel, 0);
-            TrustZone::Instance().RemoveEntry(entryId);
+            TrustHelper::Instance().RemoveEntry(entryId);
             SendMessageW(hList, LB_DELETESTRING, sel, 0);
 
         } else if (id == IDCANCEL) {
@@ -1220,7 +1220,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
         case IDC_BTN_TRUST_ZONE:
             if (g_hTrustDlg) { SetForegroundWindow(g_hTrustDlg); break; }
-            TrustZone::Instance().Load(ComputeDataDir());
+            TrustHelper::Instance().Initialize(ComputeDataDir());
             g_hTrustDlg = CreateWindowW(kTrustDlgClass, L"信任区管理",
                 WS_OVERLAPPEDWINDOW & ~WS_MAXIMIZEBOX & ~WS_THICKFRAME,
                 CW_USEDEFAULT, CW_USEDEFAULT, 640, 480,
