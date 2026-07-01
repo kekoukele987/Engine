@@ -17,6 +17,7 @@
 #include "BaselineDialog.h"
 #include "Quarantine.h"
 #include "QuarantineDialog.h"
+#include "ArchiveScanner.h"
 #include <commdlg.h>
 #include <shlobj.h>
 #include <string>
@@ -795,11 +796,66 @@ static void DoCustomScan(HWND hWnd)
     std::wstring file = OpenFileDlg(hWnd);
     if (file.empty()) return;
 
+    // 检查是否为压缩包
+    if (ArchiveScanner::IsArchiveExt(file)) {
+        Logger::Instance().Info(L"自定义扫描检测到压缩包: " + file);
+        ArchiveScanResult ar = ArchiveScanner::ScanArchive(file);
+
+        wchar_t msg[4096];
+        int idx = swprintf_s(msg,
+            L"压缩包扫描完成\n\n"
+            L"文件：%s\n"
+            L"解压：%s\n\n"
+            L"扫描结果统计：\n"
+            L"  - 威胁文件：%d 个\n"
+            L"  - 安全文件：%d 个\n"
+            L"  - 未知文件：%d 个\n"
+            L"  - 文件总数：%d 个",
+            file.c_str(),
+            ar.extractSuccess ? L"成功" : L"失败（可能不是有效压缩包）",
+            ar.blackCount, ar.whiteCount, ar.unknownCount,
+            (int)ar.fileResults.size());
+
+        if (ar.blackCount > 0) {
+            wcscat_s(msg, L"\n\n威胁文件列表：\n");
+            for (const auto& fr : ar.fileResults) {
+                if (fr.report.result == ScanResult::Black) {
+                    if (wcslen(msg) + fr.relativePath.size() + 10 < 4000) {
+                        wcscat_s(msg, (fr.relativePath + L"\n").c_str());
+                    }
+                }
+            }
+        }
+
+        // 保存扫描记录
+        ScanRecord record;
+        record.id = 0;
+        record.scanTime = GetCurrentTimeStr();
+        record.scanType = L"自定义扫描(压缩包)";
+        record.totalFiles = (int)ar.fileResults.size();
+        record.blackFiles = ar.blackCount;
+        record.whiteFiles = ar.whiteCount;
+        record.unknownFiles = ar.unknownCount;
+        record.errorFiles = 0;
+        record.heuristicHits = 0;
+        record.threatList = {};
+        for (const auto& fr : ar.fileResults) {
+            if (fr.report.result == ScanResult::Black)
+                record.threatList.push_back(file + L"(" + fr.relativePath + L")");
+        }
+        ScanHistory::Instance().Initialize(ComputeDataDir());
+        ScanHistory::Instance().AddRecord(record);
+
+        UINT icon = ar.blackCount > 0 ? MB_ICONERROR : MB_ICONINFORMATION;
+        MessageBoxW(hWnd, msg, L"自定义扫描", MB_OK | icon);
+        return;
+    }
+
+    // 普通单文件扫描
     ScanReport r = ScanFile(file);
     wchar_t md5W[33] = {};
     MultiByteToWideChar(CP_ACP, 0, r.md5.c_str(), -1, md5W, 33);
 
-    // 记录扫描日志
     wchar_t logMsg[512];
     swprintf_s(logMsg, L"自定义扫描: %s, MD5: %s", file.c_str(), md5W);
     Logger::Instance().Info(logMsg);
@@ -812,7 +868,6 @@ static void DoCustomScan(HWND hWnd)
         threatCount = 1;
         threatList.push_back(file);
         
-        // 将黑文件移入隔离区
         std::wstring dataDir = ComputeDataDir();
         Quarantine::Instance().Initialize(dataDir);
         QuarantineEntry qEntry;
@@ -841,12 +896,11 @@ static void DoCustomScan(HWND hWnd)
         MessageBoxW(hWnd, msg, L"自定义扫描", MB_OK | MB_ICONWARNING);
     }
     
-    // 保存自定义扫描记录到历史
     ScanRecord record;
     record.id = 0;
     record.scanTime = GetCurrentTimeStr();
     record.scanType = L"自定义扫描";
-    record.totalFiles = 1;  // 自定义扫描总是扫描1个文件
+    record.totalFiles = 1;
     record.blackFiles = threatCount;
     record.whiteFiles = (r.result == ScanResult::White) ? 1 : 0;
     record.unknownFiles = (r.result == ScanResult::Unknown) ? 1 : 0;
