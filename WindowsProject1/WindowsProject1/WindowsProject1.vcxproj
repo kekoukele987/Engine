@@ -171,6 +171,7 @@
     <ClInclude Include="targetver.h" />
     <ClInclude Include="TrustZone.h" />
     <ClInclude Include="WindowsProject1.h" />
+    <ClInclude Include="Quarantine.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="BaselineCommon.cpp" />
@@ -205,6 +206,7 @@
     </ClCompile>
     <ClCompile Include="TrustZone.cpp" />
     <ClCompile Include="WindowsProject1.cpp" />
+    <ClCompile Include="Quarantine.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="data\black.dat" />

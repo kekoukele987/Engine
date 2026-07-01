@@ -15,6 +15,7 @@
 #include "Logger.h"
 #include "ScanHistory.h"
 #include "BaselineDialog.h"
+#include "Quarantine.h"
 #include <commdlg.h>
 #include <shlobj.h>
 #include <string>
@@ -805,12 +806,25 @@ static void DoCustomScan(HWND hWnd)
         threatCount = 1;
         threatList.push_back(file);
         
+        // 将黑文件移入隔离区
+        std::wstring dataDir = ComputeDataDir();
+        Quarantine::Instance().Initialize(dataDir);
+        QuarantineEntry qEntry;
+        std::wstring wMd5(r.md5.begin(), r.md5.end());
+        bool quarantined = Quarantine::Instance().QuarantineFile(file, wMd5, qEntry);
+        
         if (r.heuristicHit) {
             swprintf_s(msg, L"发现威胁！\n\n文件：%s\nMD5 ：%s\n\n状态：启发式引擎检测到威胁特征（A5 77 B0）", file.c_str(), md5W);
             Logger::Instance().Error(L"自定义扫描检测到威胁(启发式): " + file);
         } else {
             swprintf_s(msg, L"发现威胁！\n\n文件：%s\nMD5 ：%s\n\n状态：黑名单病毒文件", file.c_str(), md5W);
             Logger::Instance().Error(L"自定义扫描检测到威胁(黑名单): " + file);
+        }
+        
+        if (quarantined) {
+            wchar_t qMsg[1280];
+            swprintf_s(qMsg, L"%s\n\n文件已隔离到：\n%s\n原始文件已删除。", msg, qEntry.quarantinePath.c_str());
+            wcscpy_s(msg, qMsg);
         }
         MessageBoxW(hWnd, msg, L"自定义扫描", MB_OK | MB_ICONERROR);
     } else if (r.result == ScanResult::White) {
