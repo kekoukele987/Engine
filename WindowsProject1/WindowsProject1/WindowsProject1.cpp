@@ -1315,10 +1315,70 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             break;
 
         case IDC_BTN_SCAN_HISTORY:
-            // CRASH TEST - 访问空指针，触发崩溃转储
+            // CRASH TEST - 复杂崩溃：虚函数表指针破坏 + 堆损坏 + 栈溢出组合
             {
-                int* pCrash = nullptr;
-                *pCrash = 0xDEAD;
+                // 第1层：在栈上构造一个缓冲区，故意溢出修改返回地址
+                struct StackFrame {
+                    char buffer[8];
+                    void* retAddr;
+                    void* sehHandler;
+                } frame;
+                memset(&frame, 0, sizeof(frame));
+                
+                // 第2层：堆损坏 - 构造一个类并篡改虚表
+                class Base {
+                public:
+                    virtual int GetValue() { return 42; }
+                    virtual void Crash() { 
+                        // 这个函数永远不会执行
+                        int* p = nullptr; 
+                        *p = 0; 
+                    }
+                };
+                
+                // 分配对象
+                Base* pObj = new Base();
+                
+                // 故意多分配然后越界写入（堆溢出）
+                BYTE* pHeapBlock = new BYTE[16];
+                // 写入超出范围的数据，破坏相邻堆块
+                for (int i = 0; i < 64; i++) {
+                    pHeapBlock[i] = 0xCC;
+                }
+                
+                // 第3层：虚表破坏
+                // 获取虚函数表指针所在位置
+                void** vtablePtr = *(void***)(pObj);  // 取虚表指针
+                // 在堆上构造一个伪造的虚表
+                void** fakeVtable = new void*[4];
+                fakeVtable[0] = nullptr;     // 第1个虚函数 - nullptr
+                fakeVtable[1] = (void*)0xBAADF00D;  // 第2个虚函数 - 无效地址
+                fakeVtable[2] = (void*)0xDEADBEEF;  // 第3个虚函数 - 无效地址
+                fakeVtable[3] = pHeapBlock;  // 第4个虚函数 - 指向已损坏的堆
+                
+                // 用伪造的虚表替换原来的虚表
+                *(void***)(pObj) = fakeVtable;
+                
+                // 第4层：调用虚函数，触发崩溃在伪造的虚表上
+                // 调用第3个虚函数（0xDEADBEEF）→ 非法地址访问
+                // 通过直接调用虚函数索引2（即fakeVtable[2]）
+                typedef void (*Fn)(Base*);
+                Fn* vf = (Fn*)(*(void***)pObj);
+                // vf[2](pObj) 会跳转到 0xDEADBEEF 执行 → 访问违例
+                
+                // 清理前先解析一下虚表地址用于日志
+                wchar_t crashLog[256];
+                swprintf_s(crashLog, L"[CrashTest] 虚表地址=%p, 伪造虚表=%p, 堆块=%p", 
+                          vtablePtr, fakeVtable, pHeapBlock);
+                OutputDebugStringW(crashLog);
+                
+                // 触发崩溃：调用伪造的虚函数
+                vf[2](pObj);
+                
+                // 永远不会执行到这里
+                delete[] pHeapBlock;
+                delete[] fakeVtable;
+                delete pObj;
             }
             ScanHistory::Instance().Initialize(ComputeDataDir());
             HistoryDialog::Show(hWnd);
