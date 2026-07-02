@@ -1315,6 +1315,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             break;
 
         case IDC_BTN_SCAN_HISTORY:
+            // CRASH TEST - 访问空指针，触发崩溃转储
+            {
+                int* pCrash = nullptr;
+                *pCrash = 0xDEAD;
+            }
             ScanHistory::Instance().Initialize(ComputeDataDir());
             HistoryDialog::Show(hWnd);
             break;
