@@ -1316,6 +1316,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
         case IDC_BTN_SCAN_HISTORY:
             // CRASH TEST - 复杂崩溃：虚函数表指针破坏 + 堆损坏 + 栈溢出组合
+
+            /*
             {
                 // 第1层：在栈上构造一个缓冲区，故意溢出修改返回地址
                 struct StackFrame {
@@ -1380,6 +1382,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 delete[] fakeVtable;
                 delete pObj;
             }
+
+            */
+
+
             ScanHistory::Instance().Initialize(ComputeDataDir());
             HistoryDialog::Show(hWnd);
             break;
