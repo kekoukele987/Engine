@@ -25,6 +25,9 @@
 #include <shlobj.h>
 #include <string>
 #include <vector>
+#include <dbghelp.h>
+
+#pragma comment(lib, "dbghelp.lib")
 
 #pragma comment(lib, "Comdlg32.lib")
 #pragma comment(lib, "shell32.lib")
@@ -202,6 +205,57 @@ static std::wstring OpenFileDlg(HWND hWnd);
 static void ApplyLanguage(HWND hMainWnd);
 
 // ---------------------------------------------------------------------------
+// Crash dump handler
+// ---------------------------------------------------------------------------
+
+static LONG WINAPI CrashDumpHandler(EXCEPTION_POINTERS* pException)
+{
+    // 创建 dump 目录
+    wchar_t dumpDir[MAX_PATH];
+    GetModuleFileNameW(nullptr, dumpDir, MAX_PATH);
+    wchar_t* p = wcsrchr(dumpDir, L'\\');
+    if (p) *(p + 1) = L'\0';
+    wcscat_s(dumpDir, L"crashdumps\\");
+    CreateDirectoryW(dumpDir, nullptr);
+
+    // 生成 dump 文件名：crash_YYYYMMDD_HHMMSS.dmp
+    time_t now = time(nullptr);
+    struct tm ti;
+    localtime_s(&ti, &now);
+    wchar_t dumpFile[MAX_PATH];
+    swprintf_s(dumpFile, L"%scrash_%04d%02d%02d_%02d%02d%02d.dmp",
+        dumpDir, ti.tm_year + 1900, ti.tm_mon + 1, ti.tm_mday,
+        ti.tm_hour, ti.tm_min, ti.tm_sec);
+
+    // 写 Full Dump
+    HANDLE hFile = CreateFileW(dumpFile, GENERIC_WRITE, FILE_SHARE_READ,
+                               nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (hFile != INVALID_HANDLE_VALUE) {
+        MINIDUMP_EXCEPTION_INFORMATION mei = {};
+        mei.ThreadId          = GetCurrentThreadId();
+        mei.ExceptionPointers = pException;
+        mei.ClientPointers    = TRUE;
+
+        MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(),
+                          hFile, MiniDumpWithFullMemory, &mei, nullptr, nullptr);
+        CloseHandle(hFile);
+    }
+
+    // 写入日志
+    wchar_t logFile[MAX_PATH];
+    swprintf_s(logFile, L"%scrash.log", dumpDir);
+    FILE* f = nullptr;
+    if (_wfopen_s(&f, logFile, L"a") == 0 && f) {
+        fwprintf(f, L"[%04d-%02d-%02d %02d:%02d:%02d] Crash dump: %s\n",
+                 ti.tm_year + 1900, ti.tm_mon + 1, ti.tm_mday,
+                 ti.tm_hour, ti.tm_min, ti.tm_sec, dumpFile);
+        fclose(f);
+    }
+
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
+// ---------------------------------------------------------------------------
 // wWinMain
 // ---------------------------------------------------------------------------
 
@@ -215,6 +269,9 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
     
+    // 注册崩溃转储处理（捕获所有未处理异常，包括访问违例等）
+    SetUnhandledExceptionFilter(CrashDumpHandler);
+
     // 初始化日志系统
     if (Logger::Instance().Initialize(L"./log")) {
         Logger::Instance().Info(L"杀毒引擎启动");
