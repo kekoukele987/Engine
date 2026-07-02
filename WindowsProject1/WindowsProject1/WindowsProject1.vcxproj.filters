@@ -51,9 +51,6 @@
     <ClInclude Include="sqlite3.h">
       <Filter>头文件</Filter>
     </ClInclude>
-    <ClInclude Include="TrustZone.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
     <ClInclude Include="SignatureEngine.h">
       <Filter>头文件</Filter>
     </ClInclude>
@@ -67,6 +64,69 @@
       <Filter>头文件</Filter>
     </ClInclude>
     <ClInclude Include="ArchiveScanner.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="BaselineEngine.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="BaselineDialog.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="MD5Hasher.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="Scanner.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="SoftwareDialog.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="SoftwareManager.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="FileShredder.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="ShredDialog.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="StartupDialog.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="StartupManager.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="FastSearcher.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="FastSearchDialog.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="ProcDialog.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="ProcessManager.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="ObjectManager.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="ObjDialog.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="TrustHelper.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="SchedTaskDialog.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="EtwDialog.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="SystemHealthCheck.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="HealthCheckDialog.h">
       <Filter>头文件</Filter>
     </ClInclude>
   </ItemGroup>
@@ -98,9 +158,6 @@
     <ClCompile Include="sqlite3.c">
       <Filter>源文件</Filter>
     </ClCompile>
-    <ClCompile Include="TrustZone.cpp">
-      <Filter>源文件</Filter>
-    </ClCompile>
     <ClCompile Include="SignatureEngine.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
@@ -114,6 +171,69 @@
       <Filter>源文件</Filter>
     </ClCompile>
     <ClCompile Include="ArchiveScanner.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="BaselineEngine.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="BaselineDialog.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="MD5Hasher.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="Scanner.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="SoftwareDialog.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="SoftwareManager.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="FileShredder.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="ShredDialog.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="StartupDialog.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="StartupManager.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="FastSearcher.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="FastSearchDialog.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="ProcDialog.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="ProcessManager.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="ObjectManager.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="ObjDialog.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="TrustHelper.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="SchedTaskDialog.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="EtwDialog.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="SystemHealthCheck.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="HealthCheckDialog.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
   </ItemGroup>
