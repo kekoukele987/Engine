@@ -20,6 +20,7 @@
 #include "ArchiveScanner.h"
 #include "SchedTaskDialog.h"
 #include "EtwDialog.h"
+#include "HealthCheckDialog.h"
 #include <commdlg.h>
 #include <shlobj.h>
 #include <string>
@@ -130,6 +131,7 @@ HWND hBtnObjMgr       = nullptr;
 HWND hBtnQuarantine   = nullptr;
 HWND hBtnSchedTask    = nullptr;
 HWND hBtnEtw          = nullptr;
+HWND hBtnHealthCheck  = nullptr;
 
 static HWND g_hHistoryDlg = nullptr;
 
@@ -953,11 +955,11 @@ static void RepositionButtons(HWND hWnd)
     sp(hBtnProcMgr,     sx + (BTN_W + BTN_GAP) * 2,                 yStart + (BTN_H + BTN_GAP) * 2);
     sp(hBtnObjMgr,      sx + (BTN_W + BTN_GAP) * 3,                 yStart + (BTN_H + BTN_GAP) * 2);
     
-    // Row 4
-    int qx = sx + (BTN_W + BTN_GAP);
-    sp(hBtnQuarantine,  qx,                                           yStart + (BTN_H + BTN_GAP) * 3);
-    sp(hBtnSchedTask,   qx + (BTN_W + BTN_GAP),                      yStart + (BTN_H + BTN_GAP) * 3);
-    sp(hBtnEtw,         qx + (BTN_W + BTN_GAP) * 2,                  yStart + (BTN_H + BTN_GAP) * 3);
+    // Row 4 (4 buttons, aligned with rows above)
+    sp(hBtnQuarantine,  sx,                                           yStart + (BTN_H + BTN_GAP) * 3);
+    sp(hBtnSchedTask,   sx + (BTN_W + BTN_GAP),                      yStart + (BTN_H + BTN_GAP) * 3);
+    sp(hBtnEtw,         sx + (BTN_W + BTN_GAP) * 2,                  yStart + (BTN_H + BTN_GAP) * 3);
+    sp(hBtnHealthCheck, sx + (BTN_W + BTN_GAP) * 3,                  yStart + (BTN_H + BTN_GAP) * 3);
 }
 
 // ---------------------------------------------------------------------------
@@ -1034,6 +1036,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
             0, 0, BTN_W, BTN_H, hWnd, (HMENU)IDC_BTN_ETW, hInst, nullptr);
 
+        hBtnHealthCheck = CreateWindowW(L"BUTTON", L"系统体检",
+            WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+            0, 0, BTN_W, BTN_H, hWnd, (HMENU)IDC_BTN_HEALTH_CHECK, hInst, nullptr);
+
         if (g_hFontBtn) {
             SendMessageW(hBtnQuickScan,     WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
             SendMessageW(hBtnCustomScan,    WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
@@ -1050,6 +1056,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             SendMessageW(hBtnQuarantine,    WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
             SendMessageW(hBtnSchedTask,     WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
             SendMessageW(hBtnEtw,           WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
+            SendMessageW(hBtnHealthCheck,   WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
         }
         // Apply persisted language so button texts match saved setting on startup
         ApplyLanguage(hWnd);
@@ -1127,6 +1134,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         case IDC_BTN_QUARANTINE:   clrN = CLR_BTN_TZ; clrP = CLR_BTN_TZ_P; break;
         case IDC_BTN_SCHED_TASK:   clrN = CLR_BTN_QS; clrP = CLR_BTN_QS_P; break;
         case IDC_BTN_ETW:          clrN = CLR_BTN_ST; clrP = CLR_BTN_ST_P; break;
+        case IDC_BTN_HEALTH_CHECK: clrN = CLR_BTN_CS; clrP = CLR_BTN_CS_P; break;
         default:                   clrN = CLR_BTN_DIS; clrP = CLR_BTN_DIS;  break;
         }
         COLORREF fill = disabled ? CLR_BTN_DIS : (pressed ? clrP : clrN);
@@ -1296,6 +1304,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
     case IDC_BTN_ETW:
         EtwDialog::Show(hWnd);
+        break;
+
+    case IDC_BTN_HEALTH_CHECK:
+        HealthCheckDialog::Show(hWnd);
         break;
 
     case IDC_BTN_SETTINGS:

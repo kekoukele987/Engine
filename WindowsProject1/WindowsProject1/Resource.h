@@ -54,6 +54,7 @@
 #define IDC_BTN_SCHED_CLOSE     2032
 #define IDC_SCHED_STATUS        2033
 #define IDC_BTN_ETW             1041
+#define IDC_BTN_HEALTH_CHECK    1042
 #define IDC_ETW_LIST            2050
 #define IDC_BTN_ETW_START       2051
 #define IDC_BTN_ETW_STOP        2052

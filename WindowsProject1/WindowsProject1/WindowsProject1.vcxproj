@@ -176,6 +176,8 @@
     <ClInclude Include="ArchiveScanner.h" />
     <ClInclude Include="SchedTaskDialog.h" />
     <ClInclude Include="EtwDialog.h" />
+    <ClInclude Include="SystemHealthCheck.h" />
+    <ClInclude Include="HealthCheckDialog.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="BaselineCommon.cpp" />
@@ -215,6 +217,8 @@
     <ClCompile Include="ArchiveScanner.cpp" />
     <ClCompile Include="SchedTaskDialog.cpp" />
     <ClCompile Include="EtwDialog.cpp" />
+    <ClCompile Include="SystemHealthCheck.cpp" />
+    <ClCompile Include="HealthCheckDialog.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="data\black.dat" />
