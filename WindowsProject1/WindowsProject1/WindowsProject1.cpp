@@ -357,7 +357,7 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
     hInst = hInstance;
     HWND hWnd = CreateWindowW(szWindowClass, szTitle,
         WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
-        CW_USEDEFAULT, 0, 860, 700, nullptr, nullptr, hInstance, nullptr);
+        CW_USEDEFAULT, 0, 860, 800, nullptr, nullptr, hInstance, nullptr);
     if (!hWnd) return FALSE;
     ShowWindow(hWnd, nCmdShow);
     UpdateWindow(hWnd);
@@ -1015,13 +1015,13 @@ static void RepositionButtons(HWND hWnd)
     sp(hBtnObjMgr,      sx + (BTN_W + BTN_GAP) * 3,                 yStart + (BTN_H + BTN_GAP) * 2);
     
     // Row 4 (4 buttons, aligned with rows above)
-    sp(hBtnQuarantine,  sx,                                           yStart + (BTN_H + BTN_GAP) * 3);
+    sp(hBtnQuarantine,  sx,                                          yStart + (BTN_H + BTN_GAP) * 3);
     sp(hBtnSchedTask,   sx + (BTN_W + BTN_GAP),                      yStart + (BTN_H + BTN_GAP) * 3);
     sp(hBtnEtw,         sx + (BTN_W + BTN_GAP) * 2,                  yStart + (BTN_H + BTN_GAP) * 3);
     sp(hBtnHealthCheck, sx + (BTN_W + BTN_GAP) * 3,                  yStart + (BTN_H + BTN_GAP) * 3);
     
     // Row 5: Hook Manager (centered)
-    sp(hBtnHookManager, sx + (BTN_W + BTN_GAP),                      yStart + (BTN_H + BTN_GAP) * 4);
+    sp(hBtnHookManager, sx,                                          yStart + (BTN_H + BTN_GAP) * 4);
 }
 
 // ---------------------------------------------------------------------------
