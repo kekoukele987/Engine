@@ -191,10 +191,12 @@ static MsgBoxW_t g_OriginalMsgBoxW = nullptr;
 // Hook 函数
 static int WINAPI HookedMessageBoxW(HWND hWnd, LPCWSTR lpText, LPCWSTR lpCaption, UINT uType)
 {
+    UNREFERENCED_PARAMETER(lpCaption);
+    UNREFERENCED_PARAMETER(uType);
     // 拦截并修改消息内容
     wchar_t modifiedText[256];
-    swprintf_s(modifiedText, L"[Inline Hook 拦截] 原始消息: %s", lpText);
-    return g_OriginalMsgBoxW(hWnd, modifiedText, L"Inline Hook Demo - 已拦截", uType);
+    swprintf_s(modifiedText, ARRAYSIZE(modifiedText), L"[Inline Hook 拦截] 原始消息: %ls", lpText);
+    return g_OriginalMsgBoxW(hWnd, modifiedText, L"Inline Hook Demo - 已拦截", MB_OK);
 }
 
 void HookManagerDialog::Demo_InlineHook(HWND hWnd)
@@ -218,7 +220,7 @@ void HookManagerDialog::Demo_InlineHook(HWND hWnd)
 
     AppendResult(hEdit, L"[1] 目标函数: MessageBoxW\n");
     wchar_t addrBuf[64];
-    swprintf_s(addrBuf, L"[2] 函数地址: 0x%p\n", pMsgBox);
+    swprintf_s(addrBuf, ARRAYSIZE(addrBuf), L"[2] 函数地址: 0x%p\n", pMsgBox);
     AppendResult(hEdit, addrBuf);
 
     // 保存原始字节用于备份显示
@@ -226,9 +228,9 @@ void HookManagerDialog::Demo_InlineHook(HWND hWnd)
     memcpy(originalBytes, pMsgBox, 5);
 
     wchar_t bytesBuf[128];
-    swprintf_s(bytesBuf, L"[3] 原始前5字节: %02X %02X %02X %02X %02X\n",
-               originalBytes[0], originalBytes[1], originalBytes[2],
-               originalBytes[3], originalBytes[4]);
+    swprintf_s(bytesBuf, ARRAYSIZE(bytesBuf), L"[3] 前5字节: %02X %02X %02X %02X %02X\n",
+               (BYTE)originalBytes[0], (BYTE)originalBytes[1], (BYTE)originalBytes[2],
+               (BYTE)originalBytes[3], (BYTE)originalBytes[4]);
     AppendResult(hEdit, bytesBuf);
 
     // 保存原函数地址
@@ -250,7 +252,7 @@ void HookManagerDialog::Demo_InlineHook(HWND hWnd)
 
     // 触发 Hook
     AppendResult(hEdit, L">>> 触发 Hook: 调用 MessageBoxW...\n");
-    MessageBoxW(nullptr, L"这是一条原始消息", L"原始标题", MB_OK);
+    MessageBoxW(0, L"这是一条原始消息", L"原始标题", MB_OK);
     AppendResult(hEdit, L">>> 调用完成！消息已被拦截修改\n\n");
 
     // 恢复原始字节
@@ -263,16 +265,84 @@ void HookManagerDialog::Demo_InlineHook(HWND hWnd)
 }
 
 // ---------------------------------------------------------------------------
-// 2. IAT Hook Demo
+// 2. IAT Hook Demo - 真正的 IAT Hook 实现
 // ---------------------------------------------------------------------------
+
+// 辅助函数: 计算某个 DLL 中函数的导入表地址 (IAT Thunk)
+static BOOL IatHook(
+    HMODULE hModule,
+    const char* dllName,
+    const char* funcName,
+    PVOID hookFunc,
+    PVOID* originalFunc)
+{
+    PIMAGE_DOS_HEADER pDos = (PIMAGE_DOS_HEADER)hModule;
+    if (pDos->e_magic != IMAGE_DOS_SIGNATURE) return FALSE;
+
+    PIMAGE_NT_HEADERS pNt = (PIMAGE_NT_HEADERS)((BYTE*)hModule + pDos->e_lfanew);
+    if (pNt->Signature != IMAGE_NT_SIGNATURE) return FALSE;
+
+    DWORD importRva = 0;
+    if (pNt->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC) {
+        importRva = ((IMAGE_NT_HEADERS64*)pNt)->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
+    } else {
+        importRva = ((IMAGE_NT_HEADERS32*)pNt)->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
+    }
+    if (importRva == 0) return FALSE;
+
+    PIMAGE_IMPORT_DESCRIPTOR pImport = (PIMAGE_IMPORT_DESCRIPTOR)((BYTE*)hModule + importRva);
+
+    while (pImport->Name) {
+        char* modName = (char*)((BYTE*)hModule + pImport->Name);
+        if (_stricmp(modName, dllName) == 0) {
+            PIMAGE_THUNK_DATA pOrigThunk = (PIMAGE_THUNK_DATA)((BYTE*)hModule + pImport->OriginalFirstThunk);
+            PIMAGE_THUNK_DATA pThunk = (PIMAGE_THUNK_DATA)((BYTE*)hModule + pImport->FirstThunk);
+
+            while (pOrigThunk->u1.AddressOfData) {
+                if (!(pOrigThunk->u1.Ordinal & IMAGE_ORDINAL_FLAG)) {
+                    PIMAGE_IMPORT_BY_NAME pName = (PIMAGE_IMPORT_BY_NAME)((BYTE*)hModule + pOrigThunk->u1.AddressOfData);
+                    if (strcmp(pName->Name, funcName) == 0) {
+                        *originalFunc = (PVOID)pThunk->u1.Function;
+
+                        DWORD oldProtect;
+                        VirtualProtect(&pThunk->u1.Function, sizeof(ULONG_PTR), PAGE_READWRITE, &oldProtect);
+                        pThunk->u1.Function = (ULONG_PTR)hookFunc;
+                        VirtualProtect(&pThunk->u1.Function, sizeof(ULONG_PTR), oldProtect, &oldProtect);
+                        return TRUE;
+                    }
+                }
+                pOrigThunk++;
+                pThunk++;
+            }
+        }
+        pImport++;
+    }
+    return FALSE;
+}
+
+// 原始 OpenProcess 函数指针
+typedef HANDLE(WINAPI* fnOpenProcess)(DWORD, BOOL, DWORD);
+static fnOpenProcess g_OriginalOpenProcess = NULL;
+
+// Hook 函数 - 拦截 OpenProcess
+static HANDLE WINAPI HookedOpenProcess(DWORD dwDesiredAccess, BOOL bInheritHandle, DWORD dwProcessId)
+{
+    // 记录被拦截的调用
+    wchar_t debugBuf[256];
+    swprintf_s(debugBuf, ARRAYSIZE(debugBuf),
+        L"[IAT Hook] 拦截 OpenProcess(PID=%d, Access=0x%X) -> 允许通过\n",
+        dwProcessId, dwDesiredAccess);
+    OutputDebugStringW(debugBuf);
+
+    // 调用原始函数（不拦截）
+    return g_OriginalOpenProcess(dwDesiredAccess, bInheritHandle, dwProcessId);
+}
 
 void HookManagerDialog::Demo_IATHook(HWND hWnd)
 {
     HWND hEdit = GetDlgItem(hWnd, IDC_HK_RESULT_AREA);
     ClearResult(hEdit);
     AppendResult(hEdit, L">>> IAT 钩子 (Import Table Hook) Demo\n\n");
-
-    AppendResult(hEdit, L"[1] 获取当前进程的 IAT 表...\n");
 
     // 获取本模块基址
     HMODULE hMod = GetModuleHandleW(nullptr);
@@ -281,77 +351,88 @@ void HookManagerDialog::Demo_IATHook(HWND hWnd)
         return;
     }
 
-    // 解析 DOS 头
-    IMAGE_DOS_HEADER* dosHdr = (IMAGE_DOS_HEADER*)hMod;
-    IMAGE_NT_HEADERS* ntHdrs = (IMAGE_NT_HEADERS*)((BYTE*)hMod + dosHdr->e_lfanew);
+    // 解析 DOS + NT 头
+    PIMAGE_DOS_HEADER pDos = (PIMAGE_DOS_HEADER)hMod;
+    PIMAGE_NT_HEADERS pNt = (PIMAGE_NT_HEADERS)((BYTE*)hMod + pDos->e_lfanew);
 
-    AppendResult(hEdit, L"[2] NT 头偏移: 0x");
-    wchar_t hexBuf[32];
-    swprintf_s(hexBuf, L"%X\n", dosHdr->e_lfanew);
+    wchar_t hexBuf[128];
+    swprintf_s(hexBuf, ARRAYSIZE(hexBuf), L"[1] 模块基址: 0x%p, NT头偏移: 0x%X\n", hMod, pDos->e_lfanew);
     AppendResult(hEdit, hexBuf);
 
-    // 获取导入表
-    IMAGE_IMPORT_DESCRIPTOR* importDesc = nullptr;
-    DWORD importRVA = 0;
-    if (ntHdrs->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC) {
-        auto* ntHdr64 = (IMAGE_NT_HEADERS64*)ntHdrs;
-        importRVA = ntHdr64->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
+    // 获取导入表 RVA
+    DWORD importRva = 0;
+    if (pNt->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC) {
+        importRva = ((IMAGE_NT_HEADERS64*)pNt)->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
     } else {
-        auto* ntHdr32 = (IMAGE_NT_HEADERS32*)ntHdrs;
-        importRVA = ntHdr32->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
+        importRva = ((IMAGE_NT_HEADERS32*)pNt)->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
     }
 
-    if (!importRVA) {
+    if (!importRva) {
         AppendResult(hEdit, L"[失败] 导入表为空\n");
         return;
     }
 
-    importDesc = (IMAGE_IMPORT_DESCRIPTOR*)((BYTE*)hMod + importRVA);
+    swprintf_s(hexBuf, ARRAYSIZE(hexBuf), L"[2] 导入表 RVA: 0x%X\n", importRva);
+    AppendResult(hEdit, hexBuf);
 
-    // 遍历导入的 DLL
-    int dllCount = 0;
-    int iatCount = 0;
-    std::wstringstream ss;
+    // 尝试安装 IAT Hook
+    AppendResult(hEdit, L"\n[3] 安装 IAT Hook: kernel32.dll!OpenProcess\n");
 
-    for (; importDesc->Name != 0; importDesc++) {
-        const char* dllName = (const char*)((BYTE*)hMod + importDesc->Name);
-        wchar_t wDllName[256];
-        MultiByteToWideChar(CP_ACP, 0, dllName, -1, wDllName, 256);
+    BOOL hookResult = IatHook(
+        hMod,
+        "kernel32.dll",
+        "OpenProcess",
+        HookedOpenProcess,
+        (PVOID*)&g_OriginalOpenProcess);
 
-        swprintf_s(hexBuf, L"\n  DLL[%d]: %s\n", dllCount, wDllName);
+    if (hookResult) {
+        AppendResult(hEdit, L"    成功! 原始 OpenProcess 地址: ");
+        swprintf_s(hexBuf, ARRAYSIZE(hexBuf), L"0x%p\n", g_OriginalOpenProcess);
+        AppendResult(hEdit, hexBuf);
+        AppendResult(hEdit, L"    Hook 函数地址: ");
+        swprintf_s(hexBuf, ARRAYSIZE(hexBuf), L"0x%p\n", HookedOpenProcess);
         AppendResult(hEdit, hexBuf);
 
-        // 遍历导入函数
-        IMAGE_THUNK_DATA* thunk = (IMAGE_THUNK_DATA*)((BYTE*)hMod +
-            (importDesc->OriginalFirstThunk ? importDesc->OriginalFirstThunk : importDesc->FirstThunk));
-        IMAGE_THUNK_DATA* firstThunk = (IMAGE_THUNK_DATA*)((BYTE*)hMod + importDesc->FirstThunk);
-
-        int funcCount = 0;
-        for (; thunk->u1.AddressOfData != 0; thunk++, firstThunk++, funcCount++) {
-            if (!(thunk->u1.AddressOfData & IMAGE_ORDINAL_FLAG)) {
-                IMAGE_IMPORT_BY_NAME* ibn = (IMAGE_IMPORT_BY_NAME*)((BYTE*)hMod + thunk->u1.AddressOfData);
-                swprintf_s(hexBuf, L"    [%d] %hs @ 0x%p\n", funcCount, ibn->Name, (void*)firstThunk->u1.Function);
-                AppendResult(hEdit, hexBuf);
-                iatCount++;
-                if (funcCount >= 5) {
-                    AppendResult(hEdit, L"    ... (更多函数省略)\n");
-                    break;
-                }
-            }
+        // 测试: 调用 OpenProcess 触发 Hook
+        AppendResult(hEdit, L"\n[4] 触发 Hook: 调用 OpenProcess(0, FALSE, 4)...\n");
+        HANDLE hProc = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, 21644);
+        if (hProc) {
+            AppendResult(hEdit, L"    OpenProcess 成功 (系统进程句柄)\n");
+            CloseHandle(hProc);
+        } else {
+            AppendResult(hEdit, L"    OpenProcess 失败 (权限不足, 符合预期)\n");
         }
-        dllCount++;
-        if (dllCount >= 5) {
-            AppendResult(hEdit, L"  ... (更多 DLL 省略)\n");
-            break;
+
+        // 恢复原始 IAT
+        AppendResult(hEdit, L"\n[5] 卸载 Hook: 恢复 IAT 表...\n");
+        IatHook(
+            hMod,
+            "kernel32.dll",
+            "OpenProcess",
+            g_OriginalOpenProcess,
+            (PVOID*)&g_OriginalOpenProcess);
+        g_OriginalOpenProcess = NULL;
+        AppendResult(hEdit, L"    IAT 已恢复\n");
+    } else {
+        AppendResult(hEdit, L"    失败! 本模块可能未导入 kernel32.dll!OpenProcess\n");
+        AppendResult(hEdit, L"    (提示: 某些项目配置会使用 ntdll!NtOpenProcess 直接调用)\n");
+        // 回退: 展示 IAT 扫描结果
+        AppendResult(hEdit, L"\n[4] 回退: 扫描所有导入模块信息:\n");
+
+        PIMAGE_IMPORT_DESCRIPTOR pImport = (PIMAGE_IMPORT_DESCRIPTOR)((BYTE*)hMod + importRva);
+        int dllCount = 0;
+        for (; pImport->Name != 0; pImport++, dllCount++) {
+            const char* dllName = (const char*)((BYTE*)hMod + pImport->Name);
+            if (dllCount >= 8) {
+                AppendResult(hEdit, L"    ... (更多)\n");
+                break;
+            }
+            swprintf_s(hexBuf, ARRAYSIZE(hexBuf), L"  [%d] %hs\n", dllCount, dllName);
+            AppendResult(hEdit, hexBuf);
         }
     }
 
-    swprintf_s(hexBuf, L"\n[3] 扫描结果: %d 个 DLL, %d+ 个导入函数\n", dllCount, iatCount);
-    AppendResult(hEdit, hexBuf);
-
-    AppendResult(hEdit, L"\n[4] IAT 钩子原理: 替换 FirstThunk 中的函数地址\n");
-    AppendResult(hEdit, L"    为本模块自定义函数的地址即可实现拦截\n");
-    AppendResult(hEdit, L"[✓] IAT 钩子 Demo 完成\n");
+    AppendResult(hEdit, L"\n[✓] IAT 钩子 Demo 完成\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -695,10 +776,10 @@ static LONG CALLBACK VEHExceptionHandler(PEXCEPTION_POINTERS ep)
 {
     if (ep->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION) {
         wchar_t buf[256];
-        swprintf_s(buf, L"[VEH] 捕获到访问违例!\n"
+        swprintf_s(buf, ARRAYSIZE(buf), L"[VEH] 捕获到访问违例!\n"
                        L"      异常地址: 0x%p\n"
                        L"      访问地址: 0x%p\n"
-                       L"      操作: %s\n",
+                       L"      操作: %ls\n",
                    ep->ExceptionRecord->ExceptionAddress,
                    (void*)ep->ExceptionRecord->ExceptionInformation[1],
                    ep->ExceptionRecord->ExceptionInformation[0] ? L"写入" : L"读取");
@@ -861,7 +942,7 @@ static LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lP
             if (wParam == WM_KEYDOWN) action = L"按下";
             else if (wParam == WM_SYSKEYDOWN) action = L"系统键按下";
 
-            swprintf_s(buf, L"[键盘钩子] 按键 %s | 虚拟键码=0x%X | 扫描码=0x%X | 标志=0x%X\n",
+            swprintf_s(buf, ARRAYSIZE(buf), L"[键盘钩子] 按键 %ls | 虚拟键码=0x%X | 扫描码=0x%X | 标志=0x%X\n",
                       action, kb->vkCode, kb->scanCode, kb->flags);
             AppendResult(g_hKbEdit, buf);
             g_kbHookCount++;
@@ -1122,7 +1203,7 @@ void HookManagerDialog::Demo_IRPHook(HWND hWnd)
 
     wchar_t buf[256];
     for (auto& ic : irpCodes) {
-        swprintf_s(buf, L"    MajorFunction[%d] = %s\n", ic.code, ic.name);
+        swprintf_s(buf, ARRAYSIZE(buf), L"    MajorFunction[%d] = %ls\n", ic.code, ic.name);
         AppendResult(hEdit, buf);
     }
 
