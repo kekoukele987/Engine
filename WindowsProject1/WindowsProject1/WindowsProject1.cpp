@@ -21,6 +21,7 @@
 #include "SchedTaskDialog.h"
 #include "EtwDialog.h"
 #include "HealthCheckDialog.h"
+#include "HookManager.h"
 #include <commdlg.h>
 #include <shlobj.h>
 #include <string>
@@ -59,6 +60,7 @@ struct LangStrings {
     const wchar_t* procManager;
     const wchar_t* objManager;
     const wchar_t* quarantineMgr;
+    const wchar_t* hookManager;
 };
 
 static const LangStrings kLang[] = {
@@ -73,7 +75,8 @@ static const LangStrings kLang[] = {
         L"文件搜索",
         L"进程管理",
         L"对象管理",
-        L"隔离区管理"
+        L"隔离区管理",
+        L"Hook 管理"
     },
     {
         L"Engine  Antivirus",
@@ -86,7 +89,8 @@ static const LangStrings kLang[] = {
         L"File Search",
         L"Process Manager",
         L"Object Manager",
-        L"Quarantine"
+        L"Quarantine",
+        L"Hook Manager"
     },
 };
 static const LangStrings& Str() { return kLang[(int)Settings::Instance().GetLang()]; }
@@ -135,6 +139,7 @@ HWND hBtnQuarantine   = nullptr;
 HWND hBtnSchedTask    = nullptr;
 HWND hBtnEtw          = nullptr;
 HWND hBtnHealthCheck  = nullptr;
+HWND hBtnHookManager  = nullptr;
 
 static HWND g_hHistoryDlg = nullptr;
 
@@ -352,7 +357,7 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
     hInst = hInstance;
     HWND hWnd = CreateWindowW(szWindowClass, szTitle,
         WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
-        CW_USEDEFAULT, 0, 860, 620, nullptr, nullptr, hInstance, nullptr);
+        CW_USEDEFAULT, 0, 860, 700, nullptr, nullptr, hInstance, nullptr);
     if (!hWnd) return FALSE;
     ShowWindow(hWnd, nCmdShow);
     UpdateWindow(hWnd);
@@ -641,6 +646,7 @@ static void ApplyLanguage(HWND hMainWnd)
     if (hBtnFileSearch) SetWindowTextW(hBtnFileSearch, Str().fileSearcher);
     if (hBtnProcMgr) SetWindowTextW(hBtnProcMgr, Str().procManager);
     if (hBtnQuarantine) SetWindowTextW(hBtnQuarantine, Str().quarantineMgr);
+    if (hBtnHookManager) SetWindowTextW(hBtnHookManager, Str().hookManager);
     InvalidateRect(hMainWnd, nullptr, TRUE);
     // Settings dialog: repaint header title + option buttons
     if (g_hSettingsDlg) {
@@ -847,10 +853,6 @@ static DWORD WINAPI ScanThread(LPVOID param)
 }
 
 // ---------------------------------------------------------------------------
-// Heuristic scan background thread
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
 // Custom scan
 // ---------------------------------------------------------------------------
 
@@ -1017,6 +1019,9 @@ static void RepositionButtons(HWND hWnd)
     sp(hBtnSchedTask,   sx + (BTN_W + BTN_GAP),                      yStart + (BTN_H + BTN_GAP) * 3);
     sp(hBtnEtw,         sx + (BTN_W + BTN_GAP) * 2,                  yStart + (BTN_H + BTN_GAP) * 3);
     sp(hBtnHealthCheck, sx + (BTN_W + BTN_GAP) * 3,                  yStart + (BTN_H + BTN_GAP) * 3);
+    
+    // Row 5: Hook Manager (centered)
+    sp(hBtnHookManager, sx + (BTN_W + BTN_GAP),                      yStart + (BTN_H + BTN_GAP) * 4);
 }
 
 // ---------------------------------------------------------------------------
@@ -1097,6 +1102,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
             0, 0, BTN_W, BTN_H, hWnd, (HMENU)IDC_BTN_HEALTH_CHECK, hInst, nullptr);
 
+        hBtnHookManager = CreateWindowW(L"BUTTON", Str().hookManager,
+            WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+            0, 0, BTN_W, BTN_H, hWnd, (HMENU)IDC_BTN_HOOK_MANAGER, hInst, nullptr);
+
         if (g_hFontBtn) {
             SendMessageW(hBtnQuickScan,     WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
             SendMessageW(hBtnCustomScan,    WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
@@ -1114,6 +1123,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             SendMessageW(hBtnSchedTask,     WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
             SendMessageW(hBtnEtw,           WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
             SendMessageW(hBtnHealthCheck,   WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
+            SendMessageW(hBtnHookManager,   WM_SETFONT, (WPARAM)g_hFontBtn, FALSE);
         }
         // Apply persisted language so button texts match saved setting on startup
         ApplyLanguage(hWnd);
@@ -1192,6 +1202,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         case IDC_BTN_SCHED_TASK:   clrN = CLR_BTN_QS; clrP = CLR_BTN_QS_P; break;
         case IDC_BTN_ETW:          clrN = CLR_BTN_ST; clrP = CLR_BTN_ST_P; break;
         case IDC_BTN_HEALTH_CHECK: clrN = CLR_BTN_CS; clrP = CLR_BTN_CS_P; break;
+        case IDC_BTN_HOOK_MANAGER: clrN = CLR_BTN_TZ; clrP = CLR_BTN_TZ_P; break;
         default:                   clrN = CLR_BTN_DIS; clrP = CLR_BTN_DIS;  break;
         }
         COLORREF fill = disabled ? CLR_BTN_DIS : (pressed ? clrP : clrN);
@@ -1315,77 +1326,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             break;
 
         case IDC_BTN_SCAN_HISTORY:
-            // CRASH TEST - 复杂崩溃：虚函数表指针破坏 + 堆损坏 + 栈溢出组合
-
-            /*
-            {
-                // 第1层：在栈上构造一个缓冲区，故意溢出修改返回地址
-                struct StackFrame {
-                    char buffer[8];
-                    void* retAddr;
-                    void* sehHandler;
-                } frame;
-                memset(&frame, 0, sizeof(frame));
-                
-                // 第2层：堆损坏 - 构造一个类并篡改虚表
-                class Base {
-                public:
-                    virtual int GetValue() { return 42; }
-                    virtual void Crash() { 
-                        // 这个函数永远不会执行
-                        int* p = nullptr; 
-                        *p = 0; 
-                    }
-                };
-                
-                // 分配对象
-                Base* pObj = new Base();
-                
-                // 故意多分配然后越界写入（堆溢出）
-                BYTE* pHeapBlock = new BYTE[16];
-                // 写入超出范围的数据，破坏相邻堆块
-                for (int i = 0; i < 64; i++) {
-                    pHeapBlock[i] = 0xCC;
-                }
-                
-                // 第3层：虚表破坏
-                // 获取虚函数表指针所在位置
-                void** vtablePtr = *(void***)(pObj);  // 取虚表指针
-                // 在堆上构造一个伪造的虚表
-                void** fakeVtable = new void*[4];
-                fakeVtable[0] = nullptr;     // 第1个虚函数 - nullptr
-                fakeVtable[1] = (void*)0xBAADF00D;  // 第2个虚函数 - 无效地址
-                fakeVtable[2] = (void*)0xDEADBEEF;  // 第3个虚函数 - 无效地址
-                fakeVtable[3] = pHeapBlock;  // 第4个虚函数 - 指向已损坏的堆
-                
-                // 用伪造的虚表替换原来的虚表
-                *(void***)(pObj) = fakeVtable;
-                
-                // 第4层：调用虚函数，触发崩溃在伪造的虚表上
-                // 调用第3个虚函数（0xDEADBEEF）→ 非法地址访问
-                // 通过直接调用虚函数索引2（即fakeVtable[2]）
-                typedef void (*Fn)(Base*);
-                Fn* vf = (Fn*)(*(void***)pObj);
-                // vf[2](pObj) 会跳转到 0xDEADBEEF 执行 → 访问违例
-                
-                // 清理前先解析一下虚表地址用于日志
-                wchar_t crashLog[256];
-                swprintf_s(crashLog, L"[CrashTest] 虚表地址=%p, 伪造虚表=%p, 堆块=%p", 
-                          vtablePtr, fakeVtable, pHeapBlock);
-                OutputDebugStringW(crashLog);
-                
-                // 触发崩溃：调用伪造的虚函数
-                vf[2](pObj);
-                
-                // 永远不会执行到这里
-                delete[] pHeapBlock;
-                delete[] fakeVtable;
-                delete pObj;
-            }
-
-            */
-
-
             ScanHistory::Instance().Initialize(ComputeDataDir());
             HistoryDialog::Show(hWnd);
             break;
@@ -1410,35 +1350,39 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             FastSearchDialog::Show(hWnd);
             break;
 
-    case IDC_BTN_PROC_MGR:
-        ProcDialog::Show(hWnd);
-        break;
+        case IDC_BTN_PROC_MGR:
+            ProcDialog::Show(hWnd);
+            break;
 
-    case IDC_BTN_OBJ_MGR:
-        ObjDialog::Show(hWnd);
-        break;
+        case IDC_BTN_OBJ_MGR:
+            ObjDialog::Show(hWnd);
+            break;
 
-    case IDC_BTN_QUARANTINE:
-        {
-            std::wstring dataDir = ComputeDataDir();
-            Quarantine::Instance().Initialize(dataDir);
-            QuarantineDialog::Show(hWnd);
-        }
-        break;
+        case IDC_BTN_QUARANTINE:
+            {
+                std::wstring dataDir = ComputeDataDir();
+                Quarantine::Instance().Initialize(dataDir);
+                QuarantineDialog::Show(hWnd);
+            }
+            break;
 
-    case IDC_BTN_SCHED_TASK:
-        SchedTaskDialog::Show(hWnd);
-        break;
+        case IDC_BTN_SCHED_TASK:
+            SchedTaskDialog::Show(hWnd);
+            break;
 
-    case IDC_BTN_ETW:
-        EtwDialog::Show(hWnd);
-        break;
+        case IDC_BTN_ETW:
+            EtwDialog::Show(hWnd);
+            break;
 
-    case IDC_BTN_HEALTH_CHECK:
-        HealthCheckDialog::Show(hWnd);
-        break;
+        case IDC_BTN_HEALTH_CHECK:
+            HealthCheckDialog::Show(hWnd);
+            break;
 
-    case IDC_BTN_SETTINGS:
+        case IDC_BTN_HOOK_MANAGER:
+            HookManagerDialog::Show(hWnd);
+            break;
+
+        case IDC_BTN_SETTINGS:
             if (g_hSettingsDlg) { SetForegroundWindow(g_hSettingsDlg); break; }
             g_hSettingsDlg = CreateWindowW(kSettingsDlgClass,
                 Settings::Instance().GetLang() == AppLang::Chinese ? L"设置中心" : L"Settings",

@@ -129,6 +129,9 @@
     <ClInclude Include="HealthCheckDialog.h">
       <Filter>头文件</Filter>
     </ClInclude>
+    <ClInclude Include="HookManager.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="HeuristicEngine.cpp">
@@ -234,6 +237,9 @@
       <Filter>源文件</Filter>
     </ClCompile>
     <ClCompile Include="HealthCheckDialog.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="HookManager.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
   </ItemGroup>

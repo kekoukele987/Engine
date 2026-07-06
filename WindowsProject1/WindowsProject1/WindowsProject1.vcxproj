@@ -178,6 +178,7 @@
     <ClInclude Include="EtwDialog.h" />
     <ClInclude Include="SystemHealthCheck.h" />
     <ClInclude Include="HealthCheckDialog.h" />
+    <ClInclude Include="HookManager.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="BaselineCommon.cpp" />
@@ -219,6 +220,7 @@
     <ClCompile Include="EtwDialog.cpp" />
     <ClCompile Include="SystemHealthCheck.cpp" />
     <ClCompile Include="HealthCheckDialog.cpp" />
+    <ClCompile Include="HookManager.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="data\black.dat" />
