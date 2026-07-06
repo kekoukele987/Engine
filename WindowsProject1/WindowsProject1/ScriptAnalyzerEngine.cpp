@@ -404,7 +404,7 @@ bool ScriptAnalyzerEngine::AnalyzeScript(const std::wstring& filePath, bool& err
         Logger::Instance().Warn(logMsg);
 
         for (const auto& m : m_matches) {
-            swprintf_s(logMsg, L"  行 %d | %s", m.line, m.pattern.c_str());
+            swprintf_s(logMsg, L"  行 %d | %hs", m.line, m.pattern.c_str());
             Logger::Instance().Debug(logMsg);
         }
     }

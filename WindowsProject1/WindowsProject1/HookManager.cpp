@@ -330,7 +330,7 @@ void HookManagerDialog::Demo_IATHook(HWND hWnd)
         for (; thunk->u1.AddressOfData != 0; thunk++, firstThunk++, funcCount++) {
             if (!(thunk->u1.AddressOfData & IMAGE_ORDINAL_FLAG)) {
                 IMAGE_IMPORT_BY_NAME* ibn = (IMAGE_IMPORT_BY_NAME*)((BYTE*)hMod + thunk->u1.AddressOfData);
-                swprintf_s(hexBuf, L"    [%d] %s @ 0x%p\n", funcCount, ibn->Name, (void*)firstThunk->u1.Function);
+                swprintf_s(hexBuf, L"    [%d] %hs @ 0x%p\n", funcCount, ibn->Name, (void*)firstThunk->u1.Function);
                 AppendResult(hEdit, hexBuf);
                 iatCount++;
                 if (funcCount >= 5) {
@@ -410,7 +410,7 @@ void HookManagerDialog::Demo_EATHook(HWND hWnd)
         const char* funcName = (const char*)((BYTE*)hNtdll + nameAddr[i]);
         WORD ord = ordAddr[i];
         DWORD addr = funcAddr[ord];
-        swprintf_s(buf, L"    [%d] %S @ RVA 0x%X\n", ord, funcName, addr);
+        swprintf_s(buf, L"    [%d] %hs @ RVA 0x%X\n", ord, funcName, addr);
         AppendResult(hEdit, buf);
     }
 
@@ -981,12 +981,12 @@ void HookManagerDialog::Demo_APIMonitorHook(HWND hWnd)
     AppendResult(hEdit, L"[2] 关键 API 列表 (可被监控):\n");
     const char* targetDlls[] = { "kernel32.dll", "ntdll.dll", "user32.dll" };
     for (const char* tdll : targetDlls) {
-        swprintf_s(buf, L"\n  --- %s ---\n", tdll);
+        swprintf_s(buf, L"\n  --- %hs ---\n", tdll);
         AppendResult(hEdit, buf);
         int count = 0;
         for (auto& api : apiList) {
             if (_stricmp(api.first.c_str(), tdll) == 0) {
-                swprintf_s(buf, L"    %s\n", api.second.c_str());
+                swprintf_s(buf, L"    %hs\n", api.second.c_str());
                 AppendResult(hEdit, buf);
                 count++;
                 if (count >= 8) {
@@ -1054,7 +1054,7 @@ void HookManagerDialog::Demo_SSDTOHook(HWND hWnd)
 
     wchar_t buf[256];
     for (auto& e : entries) {
-        swprintf_s(buf, L"    Syscall[0x%03X] = %s\n", e.index, e.name);
+        swprintf_s(buf, L"    Syscall[0x%03X] = %hs\n", e.index, e.name);
         AppendResult(hEdit, buf);
     }
 
@@ -1289,10 +1289,33 @@ LRESULT CALLBACK HookManagerDialog::HookDlgProc(HWND hWnd, UINT message, WPARAM 
         return (LRESULT)g_hkBrushList;
     }
 
+    case WM_CTLCOLOREDIT:
+    {
+        HDC hdc = (HDC)wParam;
+        HWND hCtrl = (HWND)lParam;
+        int id = GetDlgCtrlID(hCtrl);
+        SetTextColor(hdc, CLR_HK_TXT_MAIN);
+        // 结果区域使用卡片背景并不透明，确保旧文本被擦除
+        if (id == IDC_HK_RESULT_AREA) {
+            SetBkColor(hdc, CLR_HK_CARD_BG);
+            SetBkMode(hdc, OPAQUE);
+            return (LRESULT)g_hkBrushCard;
+        }
+        return (LRESULT)GetStockObject(WHITE_BRUSH);
+    }
+
     case WM_CTLCOLORSTATIC:
     {
         HDC hdc = (HDC)wParam;
+        HWND hCtrl = (HWND)lParam;
+        int id = GetDlgCtrlID(hCtrl);
         SetTextColor(hdc, CLR_HK_TXT_MAIN);
+        // 对描述标签和标题使用卡片背景并不透明，避免重绘遗留文字重叠
+        if (id == IDC_HK_LABEL_DESC || id == IDC_HK_LABEL_NAME) {
+            SetBkColor(hdc, CLR_HK_CARD_BG);
+            SetBkMode(hdc, OPAQUE);
+            return (LRESULT)g_hkBrushCard;
+        }
         SetBkMode(hdc, TRANSPARENT);
         return (LRESULT)GetStockObject(NULL_BRUSH);
     }
