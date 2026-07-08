@@ -181,31 +181,60 @@ static void ClearResult(HWND hEdit)
 // ===========================================================================
 
 // ---------------------------------------------------------------------------
-// 1. Inline Hook Demo
+// 1. Inline Hook Demo（同时支持 x86 / x64）
+//
+// x86: E9 + 32-bit 相对偏移 = 5 字节
+//   E9 XX XX XX XX   = JMP rel32
+//   偏移 = 目标地址 - 跳转指令下一条地址
+//   32 位地址空间内 ±2GB，对同进程内 Hook 完全足够
+//
+// x64: FF 25 + 64-bit 绝对地址 = 14 字节
+//   FF 25 00 00 00 00 XX XX XX XX XX XX XX XX
+//   = JMP qword ptr [rip+0]  ; RIP+0 指向紧随的 8 字节地址
+//   必须用 14 字节版本，因为 x64 下 EXE 和系统 DLL 地址差
+//   可能超过 ±2GB，E9 的 32-bit 偏移会溢出
+//
+// 共用机制：unhook → 调用原始 → rehook
+//   避免无限递归，无需 trampoline（demo 级实现）
 // ---------------------------------------------------------------------------
 
-// x64 绝对跳转: FF 25 00 00 00 00 + 8字节目标地址 = 14 字节
-// 为什么用 14 字节而不是 5 字节 E9?
-//   E9 + 32-bit offset 只能跳转 ±2GB，x64 下 EXE 和 user32.dll 可能相距更远，
-//   强制将 64 位地址差截断为 uint32_t 会导致跳转到错误地址从而崩溃。
-//   14 字节版本 (jmp [rip+0]) 支持完整的 64 位地址空间。
-static const int kJmpSize = 14;
+#ifdef _M_X64
+// ============================== x64 ==============================
+// FF 25 00 00 00 00 + 8-byte absolute address = 14 bytes
+// JMP [RIP+0] — position-independent, 64-bit address space safe
+static const int  kJmpSize   = 14;
+static const char* kJmpDesc  = "FF 25 + 8字节地址, 14字节";
+static const char* kArchName = "x64";
 
-// 保存原始字节和 Hook 跳转代码，供 Hook 函数内部 unhook/rehook
-static BYTE  g_InlineOrigBytes[kJmpSize] = {};
-static BYTE  g_InlineJmpCode[kJmpSize] = {};
-static FARPROC g_InlineTarget = nullptr;
-static bool  g_InlineHooked = false;
-
-// 构造 x64 绝对跳转: jmp qword ptr [rip+0] + 8字节目标地址
-static void BuildAbsJmp(BYTE* buf, uintptr_t targetAddr)
+// placementAddr: where the JMP bytes will be written (unused on x64 — FF 25 is absolute)
+static void BuildJmp(BYTE* buf, uintptr_t targetAddr, uintptr_t /*placementAddr*/)
 {
-    // FF 25 00 00 00 00 = jmp qword ptr [rip+0]
     buf[0] = 0xFF;
     buf[1] = 0x25;
-    *(uint32_t*)(buf + 2) = 0x00000000;
-    *(uintptr_t*)(buf + 6) = targetAddr;
+    *(uint32_t*)(buf + 2) = 0;           // RIP-relative offset = 0
+    *(uint64_t*)(buf + 6) = targetAddr;  // absolute target
 }
+#else
+// ============================== x86 ==============================
+// E9 + 32-bit signed relative offset = 5 bytes
+// JMP rel32 — offset = target - (placement + 5)
+static const int  kJmpSize   = 5;
+static const char* kJmpDesc  = "E9 + 32-bit offset, 5字节";
+static const char* kArchName = "x86";
+
+// placementAddr: where the JMP bytes will finally execute (NOT buf's address!)
+static void BuildJmp(BYTE* buf, uintptr_t targetAddr, uintptr_t placementAddr)
+{
+    buf[0] = 0xE9;
+    *(int32_t*)(buf + 1) = (int32_t)(targetAddr - placementAddr - kJmpSize);
+}
+#endif
+
+// 全局状态
+static BYTE    g_InlineOrigBytes[kJmpSize] = {};
+static BYTE    g_InlineJmpCode[kJmpSize]   = {};
+static FARPROC g_InlineTarget              = nullptr;
+static bool    g_InlineHooked              = false;
 
 // Hook 函数
 static int WINAPI HookedMessageBoxW(HWND hWnd, LPCWSTR lpText, LPCWSTR lpCaption, UINT uType)
@@ -213,11 +242,7 @@ static int WINAPI HookedMessageBoxW(HWND hWnd, LPCWSTR lpText, LPCWSTR lpCaption
     UNREFERENCED_PARAMETER(lpCaption);
     UNREFERENCED_PARAMETER(uType);
 
-    // === 关键修复：unhook → 调用原始 → rehook ===
-    // 不能直接调用 g_OriginalMsgBoxW，因为那仍然指向被覆写的函数入口，
-    // 会导致无限递归 → 栈溢出 → 崩溃。
-    // 正确做法：临时恢复原始字节，调用原始 API，再重新安装 Hook。
-
+    // unhook → call original → rehook (avoids infinite recursion)
     if (g_InlineTarget && g_InlineHooked) {
         DWORD oldProtect;
         VirtualProtect(g_InlineTarget, kJmpSize, PAGE_EXECUTE_READWRITE, &oldProtect);
@@ -225,12 +250,10 @@ static int WINAPI HookedMessageBoxW(HWND hWnd, LPCWSTR lpText, LPCWSTR lpCaption
         VirtualProtect(g_InlineTarget, kJmpSize, oldProtect, &oldProtect);
     }
 
-    // 调用原始 MessageBoxW
     wchar_t modifiedText[256];
     swprintf_s(modifiedText, ARRAYSIZE(modifiedText), L"[Inline Hook 拦截] 原始消息: %ls", lpText);
     int result = MessageBoxW(hWnd, modifiedText, L"Inline Hook Demo - 已拦截", MB_OK);
 
-    // 重新安装 Hook
     if (g_InlineTarget && g_InlineHooked) {
         DWORD oldProtect;
         VirtualProtect(g_InlineTarget, kJmpSize, PAGE_EXECUTE_READWRITE, &oldProtect);
@@ -245,9 +268,13 @@ void HookManagerDialog::Demo_InlineHook(HWND hWnd)
 {
     HWND hEdit = GetDlgItem(hWnd, IDC_HK_RESULT_AREA);
     ClearResult(hEdit);
-    AppendResult(hEdit, L">>> 内联钩子 (Inline Hook) Demo\n\n");
 
+    //test
     MessageBoxW(0, L"这是一条原始消息", L"原始标题", MB_OK);
+
+    wchar_t buf[256];
+    swprintf_s(buf, L">>> 内联钩子 (Inline Hook) Demo  [架构: %hs]\n\n", kArchName);
+    AppendResult(hEdit, buf);
 
     // 获取 MessageBoxW 实际地址
     HMODULE hUser32 = GetModuleHandleW(L"user32.dll");
@@ -263,39 +290,34 @@ void HookManagerDialog::Demo_InlineHook(HWND hWnd)
     }
 
     AppendResult(hEdit, L"[1] 目标函数: MessageBoxW\n");
-    wchar_t addrBuf[64];
-    swprintf_s(addrBuf, ARRAYSIZE(addrBuf), L"[2] 函数地址: 0x%p\n", pMsgBox);
-    AppendResult(hEdit, addrBuf);
+    swprintf_s(buf, ARRAYSIZE(buf), L"[2] 函数地址: 0x%p\n", pMsgBox);
+    AppendResult(hEdit, buf);
 
     // 保存原始字节
     memcpy(g_InlineOrigBytes, pMsgBox, kJmpSize);
 
-    wchar_t bytesBuf[256];
-    swprintf_s(bytesBuf, ARRAYSIZE(bytesBuf),
-               L"[3] 前%d字节: %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X\n",
-               kJmpSize,
-               g_InlineOrigBytes[0], g_InlineOrigBytes[1], g_InlineOrigBytes[2],
-               g_InlineOrigBytes[3], g_InlineOrigBytes[4], g_InlineOrigBytes[5],
-               g_InlineOrigBytes[6], g_InlineOrigBytes[7], g_InlineOrigBytes[8],
-               g_InlineOrigBytes[9], g_InlineOrigBytes[10], g_InlineOrigBytes[11],
-               g_InlineOrigBytes[12], g_InlineOrigBytes[13]);
-    AppendResult(hEdit, bytesBuf);
+    swprintf_s(buf, ARRAYSIZE(buf),
+               L"[3] 原始前%d字节 (%hs): %02X %02X %02X %02X %02X%hs\n",
+               kJmpSize, kArchName,
+               g_InlineOrigBytes[0], g_InlineOrigBytes[1],
+               g_InlineOrigBytes[2], g_InlineOrigBytes[3],
+               g_InlineOrigBytes[4],
+               kJmpSize > 5 ? " ..." : "");
+    AppendResult(hEdit, buf);
 
-    // 保存目标地址
+    // 构造跳转指令 — 关键：传入 placementAddr 确保 x86 E9 偏移计算正确
     g_InlineTarget = pMsgBox;
+    BuildJmp(g_InlineJmpCode, (uintptr_t)HookedMessageBoxW, (uintptr_t)pMsgBox);
 
-    // 构造 x64 绝对跳转: jmp [rip+0] + 目标地址 (14 字节)
-    BuildAbsJmp(g_InlineJmpCode, (uintptr_t)HookedMessageBoxW);
-
-    // 修改内存保护并写入 Hook
+    // 写入 Hook
     DWORD oldProtect;
     VirtualProtect(pMsgBox, kJmpSize, PAGE_EXECUTE_READWRITE, &oldProtect);
     memcpy(pMsgBox, g_InlineJmpCode, kJmpSize);
     VirtualProtect(pMsgBox, kJmpSize, oldProtect, &oldProtect);
-
     g_InlineHooked = true;
 
-    AppendResult(hEdit, L"[4] x64 绝对跳转已写入 (FF 25 + 8字节地址, 14字节)\n");
+    swprintf_s(buf, ARRAYSIZE(buf), L"[4] 跳转指令已写入 (%hs)\n", kJmpDesc);
+    AppendResult(hEdit, buf);
     AppendResult(hEdit, L"[5] 内存保护已修改: PAGE_EXECUTE_READWRITE\n\n");
 
     // 触发 Hook
@@ -308,7 +330,6 @@ void HookManagerDialog::Demo_InlineHook(HWND hWnd)
     VirtualProtect(pMsgBox, kJmpSize, PAGE_EXECUTE_READWRITE, &oldProtect);
     memcpy(pMsgBox, g_InlineOrigBytes, kJmpSize);
     VirtualProtect(pMsgBox, kJmpSize, oldProtect, &oldProtect);
-
     g_InlineTarget = nullptr;
 
     AppendResult(hEdit, L"[6] Hook 已卸载，原始字节已恢复\n");
