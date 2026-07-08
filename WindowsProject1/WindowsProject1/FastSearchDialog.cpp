@@ -156,9 +156,10 @@ void FastSearchDialog::DoSearch(HWND hWnd)
         ListView_SetItemText(g_hList, (int)i, 2, const_cast<wchar_t*>(FormatFileSize(r.fileSize).c_str()));
 
         wchar_t timeBuf[64] = {};
+        FILETIME localFt;
+        FileTimeToLocalFileTime(&r.modified, &localFt);
         SYSTEMTIME st;
-        FileTimeToLocalFileTime(&r.modified, (FILETIME*)&st);
-        FileTimeToSystemTime(&r.modified, &st);
+        FileTimeToSystemTime(&localFt, &st);
         swprintf_s(timeBuf, L"%04d-%02d-%02d %02d:%02d",
                    st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute);
         ListView_SetItemText(g_hList, (int)i, 3, timeBuf);

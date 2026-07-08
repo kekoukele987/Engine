@@ -247,6 +247,8 @@ void HookManagerDialog::Demo_InlineHook(HWND hWnd)
     ClearResult(hEdit);
     AppendResult(hEdit, L">>> 内联钩子 (Inline Hook) Demo\n\n");
 
+    MessageBoxW(0, L"这是一条原始消息", L"原始标题", MB_OK);
+
     // 获取 MessageBoxW 实际地址
     HMODULE hUser32 = GetModuleHandleW(L"user32.dll");
     if (!hUser32) {

@@ -102,11 +102,25 @@ void FastSearcher::BuildIndex(SearchProgressFn onProgress)
         }
     }
 
+    // USN 记录只有文件名 + ParentFRN，需要重建完整路径
+    ResolvePaths();
+
     m_indexBuilt = true;
 }
 
 // ===========================================================================
 // USN Journal 枚举
+//
+// USN Journal 返回的是 MFT 中所有文件的扁平列表，每条记录包含：
+//   - 文件名 (FileName)
+//   - 文件引用号 (FileReferenceNumber / FRN)
+//   - 父目录引用号 (ParentFileReferenceNumber)
+//   - 时间戳 (TimeStamp)
+//   - 文件属性 (FileAttributes)
+//
+// 注意：USN 记录不含完整路径和文件大小。
+//   路径 → 需通过 FRN→ParentFRN 链重建目录树
+//   大小 → 需额外打开文件查询（MFT 中有，但 FSCTL_ENUM_USN_DATA 不返回）
 // ===========================================================================
 
 void FastSearcher::EnumerateVolumeUsn(const std::wstring& volumePath,
@@ -137,6 +151,11 @@ void FastSearcher::EnumerateVolumeUsn(const std::wstring& volumePath,
     med.LowUsn  = 0;
     med.HighUsn = jd.NextUsn;
 
+    // 卷根路径（用于路径拼接），格式如 "C:"
+    std::wstring volRoot = volumePath;
+    if (!volRoot.empty() && volRoot.back() == L'\\')
+        volRoot.pop_back();
+
     BYTE buf[65536];
     volatile LONG total = 0;
 
@@ -148,49 +167,116 @@ void FastSearcher::EnumerateVolumeUsn(const std::wstring& volumePath,
             break;
         }
 
+        USN_RECORD_V2* lastRecord = nullptr;
+
         DWORD off = 0;
         while (off + sizeof(USN_RECORD_V2) <= read) {
             auto* r = (USN_RECORD_V2*)(buf + off);
             if (r->RecordLength == 0) break;
             if (off + r->RecordLength > read) break;
 
-            // 跳过目录
-            if (!(r->FileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
-                // 提取文件名
-                WORD fnLen = r->FileNameLength;
-                std::wstring name(r->FileName, fnLen / sizeof(wchar_t));
-                if (!name.empty() && name != L"." && name != L"..") {
-                    FileSearchResult res;
-                    res.fileName = name;
-                    res.isDir    = false;
-                    // USN 记录没有文件大小，设为 0
-                    res.fileSize = 0;
+            lastRecord = r;
 
-                    // 小写转存
-                    std::wstring lower = name;
-                    for (auto& c : lower) c = towlower(c);
+            WORD fnLen = r->FileNameLength;
+            std::wstring name(r->FileName, fnLen / sizeof(wchar_t));
+            bool isDir = !!(r->FileAttributes & FILE_ATTRIBUTE_DIRECTORY);
 
-                    EnterCriticalSection(&m_cs);
-                    int id = (int)m_index.size();
-                    m_index.push_back(res);
-                    InsertToTrie(id, lower);
-                    LeaveCriticalSection(&m_cs);
-
-                    LONG t = InterlockedIncrement(&total);
-                    if (onProgress && !onProgress(res, t)) break;
-                }
+            // 跳过 "." ".." 和系统卷信息
+            if (name.empty() || name == L"." || name == L".." ||
+                name.find(L'$') == 0)  // $Mft, $LogFile 等 NTFS 元数据
+            {
+                off += r->RecordLength;
+                continue;
             }
+
+            FileSearchResult res;
+            res.fileName  = name;
+            res.isDir     = isDir;
+            res.fileSize  = 0;  // USN 记录不含文件大小
+            res.modified  = *(FILETIME*)&r->TimeStamp;  // TimeStamp 就是 FILETIME 格式
+            res.created   = res.modified;  // USN 不含创建时间
+            res.frn       = r->FileReferenceNumber;
+            res.parentFrn = r->ParentFileReferenceNumber;
+
+            // 特殊处理卷根目录 (FRN=5 是 NTFS 根目录)
+            if (r->FileReferenceNumber == 5) {
+                res.directory = L"";
+                res.fullPath  = volRoot;
+            }
+
+            // 小写转存用于前缀树搜索
+            std::wstring lower = name;
+            for (auto& c : lower) c = towlower(c);
+
+            EnterCriticalSection(&m_cs);
+            int id = (int)m_index.size();
+            m_index.push_back(res);
+            InsertToTrie(id, lower);
+            LeaveCriticalSection(&m_cs);
+
+            LONG t = InterlockedIncrement(&total);
+            if (onProgress && !onProgress(res, t)) break;
 
             off += r->RecordLength;
         }
 
-        // 解析下一个 USN 位置
-        med.StartFileReferenceNumber = ((MFT_ENUM_DATA_V0*)buf)->StartFileReferenceNumber;
-        med.LowUsn  = ((MFT_ENUM_DATA_V0*)buf)->LowUsn;
-        med.HighUsn = jd.NextUsn;
+        if (lastRecord) {
+            med.StartFileReferenceNumber = lastRecord->FileReferenceNumber;
+            med.LowUsn  = lastRecord->Usn;
+            med.HighUsn = jd.NextUsn;
+        } else {
+            break;
+        }
     }
 
     CloseHandle(hVol);
+}
+
+// ===========================================================================
+// 目录树重建
+//
+// USN 记录只包含 ParentFileReferenceNumber，没有完整路径。
+// 此函数通过 FRN → ParentFRN 链重建每个文件的完整路径。
+// 算法：迭代收敛 — 每轮解析"父目录路径已知"的条目，直到全部完成。
+// ===========================================================================
+
+void FastSearcher::ResolvePaths()
+{
+    // FRN → 完整路径映射（目录只需建一次）
+    std::unordered_map<DWORDLONG, std::wstring> frnToPath;
+
+    // 第一遍：种子 — 已解析的条目（卷根目录 FRN=5）
+    for (auto& e : m_index) {
+        if (!e.fullPath.empty()) {
+            frnToPath[e.frn] = e.fullPath;
+        }
+    }
+
+    // 迭代解析：每轮处理"父路径已知"的条目，直到无新进展
+    bool progress = true;
+    while (progress) {
+        progress = false;
+        for (auto& e : m_index) {
+            if (!e.fullPath.empty()) continue;  // 已解析
+
+            auto it = frnToPath.find(e.parentFrn);
+            if (it != frnToPath.end()) {
+                std::wstring full = it->second + L"\\" + e.fileName;
+                e.fullPath  = full;
+                e.directory = it->second;
+                if (e.isDir) {
+                    frnToPath[e.frn] = full;  // 目录可被后续文件引用
+                }
+                progress = true;
+            }
+        }
+    }
+
+    // 释放内部字段内存（之后不再需要 FRN 信息）
+    for (auto& e : m_index) {
+        e.frn       = 0;
+        e.parentFrn = 0;
+    }
 }
 
 // ===========================================================================

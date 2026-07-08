@@ -2,6 +2,7 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <unordered_map>
 #include <functional>
 #include <windows.h>
 
@@ -17,6 +18,9 @@ struct FileSearchResult {
     FILETIME     modified  = {};
     FILETIME     created   = {};
     bool         isDir     = false;
+    // USN 内部字段（路径解析用，不对外展示）
+    DWORDLONG    frn       = 0;   // FileReferenceNumber
+    DWORDLONG    parentFrn = 0;   // ParentFileReferenceNumber
 };
 
 /// 搜索进度回调：返回 false 可取消搜索
@@ -66,6 +70,9 @@ private:
     // --- USN Journal 读取 ---
     void EnumerateVolumeUsn(const std::wstring& volumePath,
                             SearchProgressFn onProgress);
+
+    // --- 目录树重建：USN 记录只有文件名+ParentFRN，需要重建完整路径 ---
+    void ResolvePaths();
 
     // --- NtQueryDirectoryFile 直接搜索 ---
     void NtQueryEnumDir(const std::wstring& dirPath,
