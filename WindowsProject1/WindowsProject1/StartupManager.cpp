@@ -133,6 +133,37 @@ std::wstring StartupManager::ReadRegStr(HKEY hKey, const wchar_t* valueName)
     return result;
 }
 
+// Read REG_MULTI_SZ into individual strings
+static std::vector<std::wstring> ReadRegMultiSz(HKEY hKey, const wchar_t* valueName)
+{
+    std::vector<std::wstring> out;
+    DWORD type = 0, size = 0;
+    if (RegQueryValueExW(hKey, valueName, nullptr, &type, nullptr, &size) != ERROR_SUCCESS)
+        return out;
+    if (type != REG_MULTI_SZ) return out;
+    std::vector<wchar_t> buf(size / sizeof(wchar_t) + 2);
+    if (RegQueryValueExW(hKey, valueName, nullptr, &type, (LPBYTE)buf.data(), &size) != ERROR_SUCCESS)
+        return out;
+    // Parse: strings separated by \0, terminated by double \0
+    const wchar_t* p = buf.data();
+    while (*p) {
+        out.push_back(std::wstring(p));
+        p += out.back().size() + 1;
+    }
+    return out;
+}
+// Root+subkey version
+static std::vector<std::wstring> ReadRegMultiSz(HKEY root, const wchar_t* subKey,
+                                                  const wchar_t* valueName)
+{
+    HKEY hKey = nullptr;
+    if (RegOpenKeyExW(root, subKey, 0, KEY_READ, &hKey) != ERROR_SUCCESS)
+        return {};
+    auto result = ReadRegMultiSz(hKey, valueName);
+    RegCloseKey(hKey);
+    return result;
+}
+
 void StartupManager::EnumRegValues(HKEY root, const wchar_t* subKey,
                                     StartupType type,
                                     std::vector<StartupEntry>& results, REGSAM extra)
@@ -538,48 +569,35 @@ void StartupManager::ScanDrivers(std::vector<StartupEntry>& r) {
 // ===========================================================================
 
 void StartupManager::ScanScheduledTasks(std::vector<StartupEntry>& r) {
-    HKEY hKey = nullptr;
-    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE,
-            L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Schedule\\TaskCache\\Tasks",
-            0, KEY_READ, &hKey) != ERROR_SUCCESS) return;
+    // 扫描模式：枚举 TaskCache\Tasks 下的子键，读取 Path（可读路径）
+    // 不读 Actions 值 — 它是 REG_BINARY 序列化的任务操作数据，不是字符串
+    struct { HKEY root; const wchar_t* subKey; const wchar_t* prefix; } roots[] = {
+        { HKEY_LOCAL_MACHINE,
+          L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Schedule\\TaskCache\\Tasks",
+          L"Task: " },
+        { HKEY_CURRENT_USER,
+          L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Schedule\\TaskCache\\Tasks",
+          L"Task (HKCU): " },
+    };
 
-    wchar_t kn[1024];
-    for (DWORD idx = 0; ; idx++) {
-        DWORD knLen = 1024;
-        if (RegEnumKeyExW(hKey, idx, kn, &knLen, nullptr, nullptr, nullptr, nullptr) != ERROR_SUCCESS) break;
-        HKEY hSub = nullptr;
-        if (RegOpenKeyExW(hKey, kn, 0, KEY_READ, &hSub) == ERROR_SUCCESS) {
-            std::wstring path = ReadRegStr(hSub, L"Path");
-            std::wstring actions = ReadRegStr(hSub, L"Actions");
-            if (!path.empty()) {
-                StartupEntry e;
-                e.name = path;
-                e.command = actions.empty() ? path : actions;
-                e.location = L"Task: " + path;
-                e.type = StartupType::ScheduledTask;
-                r.push_back(std::move(e));
-            }
-            RegCloseKey(hSub);
-        }
-    }
-    RegCloseKey(hKey);
+    for (auto& rt : roots) {
+        HKEY hKey = nullptr;
+        if (RegOpenKeyExW(rt.root, rt.subKey, 0, KEY_READ, &hKey) != ERROR_SUCCESS)
+            continue;
 
-    // Also scan HKCU\Software\...\TaskCache\Tasks
-    if (RegOpenKeyExW(HKEY_CURRENT_USER,
-            L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Schedule\\TaskCache\\Tasks",
-            0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+        wchar_t kn[1024];
         for (DWORD idx = 0; ; idx++) {
             DWORD knLen = 1024;
-            if (RegEnumKeyExW(hKey, idx, kn, &knLen, nullptr, nullptr, nullptr, nullptr) != ERROR_SUCCESS) break;
+            if (RegEnumKeyExW(hKey, idx, kn, &knLen, nullptr, nullptr, nullptr, nullptr) != ERROR_SUCCESS)
+                break;
             HKEY hSub = nullptr;
             if (RegOpenKeyExW(hKey, kn, 0, KEY_READ, &hSub) == ERROR_SUCCESS) {
                 std::wstring path = ReadRegStr(hSub, L"Path");
-                std::wstring actions = ReadRegStr(hSub, L"Actions");
                 if (!path.empty()) {
                     StartupEntry e;
                     e.name = path;
-                    e.command = actions.empty() ? path : actions;
-                    e.location = L"Task (HKCU): " + path;
+                    e.command = path;    // Path 就是任务的全限定路径，如 \Microsoft\Windows\...
+                    e.location = rt.prefix + path;
                     e.type = StartupType::ScheduledTask;
                     r.push_back(std::move(e));
                 }
@@ -599,35 +617,26 @@ void StartupManager::ScanBootExecute(std::vector<StartupEntry>& r) {
     HKEY hKey;
 
     if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, kSM, 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
-        // BootExecute
-        std::wstring be = ReadRegStr(hKey, L"BootExecute");
-        if (!be.empty()) {
-            // REG_MULTI_SZ — parse null-terminated strings
-            for (const wchar_t* p = be.c_str(); *p; p += wcslen(p) + 1) {
-                std::wstring cmd(p);
-                if (!cmd.empty() && cmd != L"autocheck autochk *") {
-                    StartupEntry e;
-                    e.name = cmd;
-                    e.command = cmd;
-                    e.location = std::wstring(kSM) + L"\\BootExecute";
-                    e.type = StartupType::BootExecute;
-                    r.push_back(std::move(e));
-                }
+        // BootExecute (REG_MULTI_SZ)
+        for (auto& cmd : ReadRegMultiSz(hKey, L"BootExecute")) {
+            if (!cmd.empty() && cmd != L"autocheck autochk *") {
+                StartupEntry e;
+                e.name = cmd;
+                e.command = cmd;
+                e.location = std::wstring(kSM) + L"\\BootExecute";
+                e.type = StartupType::BootExecute;
+                r.push_back(std::move(e));
             }
         }
-        // Execute (SetupExecute)
-        std::wstring se = ReadRegStr(hKey, L"Execute");
-        if (!se.empty()) {
-            for (const wchar_t* p = se.c_str(); *p; p += wcslen(p) + 1) {
-                std::wstring cmd(p);
-                if (!cmd.empty()) {
-                    StartupEntry e;
-                    e.name = cmd;
-                    e.command = cmd;
-                    e.location = std::wstring(kSM) + L"\\Execute";
-                    e.type = StartupType::SessionManagerExecute;
-                    r.push_back(std::move(e));
-                }
+        // Execute / SetupExecute (REG_MULTI_SZ)
+        for (auto& cmd : ReadRegMultiSz(hKey, L"Execute")) {
+            if (!cmd.empty()) {
+                StartupEntry e;
+                e.name = cmd;
+                e.command = cmd;
+                e.location = std::wstring(kSM) + L"\\Execute";
+                e.type = StartupType::SessionManagerExecute;
+                r.push_back(std::move(e));
             }
         }
         RegCloseKey(hKey);
@@ -696,29 +705,22 @@ void StartupManager::ScanKnownDLLs(std::vector<StartupEntry>& r) {
 void StartupManager::ScanLSA(std::vector<StartupEntry>& r) {
     const wchar_t* kLSA = L"SYSTEM\\CurrentControlSet\\Control\\Lsa";
 
-    auto scanPkg = [&](const wchar_t* val, StartupType t) {
-        std::wstring data = ReadRegStr(HKEY_LOCAL_MACHINE, kLSA, val);
-        size_t pos = 0;
-        while (pos < data.size()) {
-            auto nl = data.find(L'\n', pos);
-            std::wstring line = (nl == std::wstring::npos) ? data.substr(pos) : data.substr(pos, nl - pos);
-            while (!line.empty() && (line.back() == L'\r' || line.back() == L'\n')) line.pop_back();
-            if (!line.empty()) {
+    auto addPkgs = [&](const wchar_t* val, StartupType t) {
+        for (auto& name : ReadRegMultiSz(HKEY_LOCAL_MACHINE, kLSA, val)) {
+            if (!name.empty()) {
                 StartupEntry e;
-                e.name = line;
-                e.command = line;
+                e.name = name;
+                e.command = name;
                 e.location = std::wstring(kLSA) + L"\\" + val;
                 e.type = t;
                 r.push_back(std::move(e));
             }
-            if (nl == std::wstring::npos) break;
-            pos = nl + 1;
         }
     };
 
-    scanPkg(L"Authentication Packages", StartupType::LSAAuthPackage);
-    scanPkg(L"Notification Packages",   StartupType::LSANotifyPackage);
-    scanPkg(L"Security Packages",       StartupType::LSASecurityPackage);
+    addPkgs(L"Authentication Packages", StartupType::LSAAuthPackage);
+    addPkgs(L"Notification Packages",   StartupType::LSANotifyPackage);
+    addPkgs(L"Security Packages",       StartupType::LSASecurityPackage);
 }
 
 // ===========================================================================
