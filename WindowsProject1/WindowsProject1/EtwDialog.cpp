@@ -104,11 +104,11 @@ static DWORD WINAPI MonitorThread(LPVOID param)
     }
 
     while (g_monitoringActive) {
-        // 查询进程列表
+        // 查询进程列表（同步枚举，避免 x86 WOW64 下半同步提前截断）
         IEnumWbemClassObject* pEnumerator = nullptr;
         hr = pSvc->ExecQuery(_bstr_t(L"WQL"),
              _bstr_t(L"SELECT * FROM Win32_Process"),
-             WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY,
+             WBEM_FLAG_FORWARD_ONLY,
              nullptr, &pEnumerator);
 
         if (SUCCEEDED(hr) && pEnumerator) {
@@ -133,9 +133,15 @@ static DWORD WINAPI MonitorThread(LPVOID param)
                     procName = vtName.bstrVal;
                 }
 
-                if (SUCCEEDED(pclsObj->Get(L"ProcessId", 0, &vtPID, nullptr, nullptr)) &&
-                    vtPID.vt == VT_BSTR) {
-                    pid = vtPID.bstrVal;
+                // ProcessId: x86 下 WMI 常返回 VT_I4, x64 常返回 VT_BSTR，两者都处理
+                if (SUCCEEDED(pclsObj->Get(L"ProcessId", 0, &vtPID, nullptr, nullptr))) {
+                    if (vtPID.vt == VT_I4) {
+                        wchar_t buf[32];
+                        swprintf_s(buf, L"%u", vtPID.uintVal);
+                        pid = buf;
+                    } else if (vtPID.vt == VT_BSTR) {
+                        pid = vtPID.bstrVal;
+                    }
                 }
 
                 if (SUCCEEDED(pclsObj->Get(L"CommandLine", 0, &vtCmdLine, nullptr, nullptr)) &&
@@ -143,9 +149,15 @@ static DWORD WINAPI MonitorThread(LPVOID param)
                     cmdLine = vtCmdLine.bstrVal;
                 }
 
-                if (SUCCEEDED(pclsObj->Get(L"ParentProcessId", 0, &vtParentPID, nullptr, nullptr)) &&
-                    vtParentPID.vt == VT_BSTR) {
-                    parentPid = vtParentPID.bstrVal;
+                // ParentProcessId: 同 ProcessId，处理 VT_I4 + VT_BSTR
+                if (SUCCEEDED(pclsObj->Get(L"ParentProcessId", 0, &vtParentPID, nullptr, nullptr))) {
+                    if (vtParentPID.vt == VT_I4) {
+                        wchar_t buf[32];
+                        swprintf_s(buf, L"%u", vtParentPID.uintVal);
+                        parentPid = buf;
+                    } else if (vtParentPID.vt == VT_BSTR) {
+                        parentPid = vtParentPID.bstrVal;
+                    }
                 }
 
                 VariantClear(&vtName);
