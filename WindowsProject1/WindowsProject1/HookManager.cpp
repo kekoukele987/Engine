@@ -1522,6 +1522,9 @@ LRESULT CALLBACK HookManagerDialog::HookDlgProc(HWND hWnd, UINT message, WPARAM 
                 SetWindowTextW(hLabelName, name);
                 SetWindowTextW(hLabelDesc, desc);
                 SetWindowTextW(hResultArea, L"");
+                // 强制整控件擦除+重绘，避免切换钩子类型时旧文字残留重叠
+                InvalidateRect(hLabelName, nullptr, TRUE);
+                InvalidateRect(hLabelDesc, nullptr, TRUE);
             }
             return 0;
         }
