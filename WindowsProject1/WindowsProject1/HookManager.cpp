@@ -337,10 +337,18 @@ void HookManagerDialog::Demo_InlineHook(HWND hWnd)
 }
 
 // ---------------------------------------------------------------------------
-// 2. IAT Hook Demo - 真正的 IAT Hook 实现
+// 2. IAT Hook Demo — 修改本进程 IAT 表劫持 API 调用
+//
+// 选择 GetCurrentProcessId 作为目标的原因：
+//   - 任何 Win32 应用都必然导入 kernel32.dll!GetCurrentProcessId
+//   - 无参数、永远成功、返回值可验证
+//   - 修改返回值 (+10000) 即可直观证明 Hook 生效
+//   - 不依赖外部 PID 或权限，自包含验证
+//
+// 验证流程：before → hook → after → unhook → restored
 // ---------------------------------------------------------------------------
 
-// 辅助函数: 计算某个 DLL 中函数的导入表地址 (IAT Thunk)
+// 辅助函数: 修改当前模块 IAT 表中指定函数的地址
 static BOOL IatHook(
     HMODULE hModule,
     const char* dllName,
@@ -392,22 +400,18 @@ static BOOL IatHook(
     return FALSE;
 }
 
-// 原始 OpenProcess 函数指针
-typedef HANDLE(WINAPI* fnOpenProcess)(DWORD, BOOL, DWORD);
-static fnOpenProcess g_OriginalOpenProcess = NULL;
+typedef DWORD (WINAPI* fnGetCurrentProcessId)();
+static fnGetCurrentProcessId g_OriginalGetCurrentProcessId = nullptr;
 
-// Hook 函数 - 拦截 OpenProcess
-static HANDLE WINAPI HookedOpenProcess(DWORD dwDesiredAccess, BOOL bInheritHandle, DWORD dwProcessId)
+// Hook 函数：返回实际 PID + 10000 以证明拦截成功
+static DWORD WINAPI HookedGetCurrentProcessId()
 {
-    // 记录被拦截的调用
-    wchar_t debugBuf[256];
-    swprintf_s(debugBuf, ARRAYSIZE(debugBuf),
-        L"[IAT Hook] 拦截 OpenProcess(PID=%d, Access=0x%X) -> 允许通过\n",
-        dwProcessId, dwDesiredAccess);
-    OutputDebugStringW(debugBuf);
-
-    // 调用原始函数（不拦截）
-    return g_OriginalOpenProcess(dwDesiredAccess, bInheritHandle, dwProcessId);
+    DWORD realPid = g_OriginalGetCurrentProcessId();
+    wchar_t dbg[128];
+    swprintf_s(dbg, L"[IAT Hook] GetCurrentProcessId() 被拦截! 实际PID=%d, 返回=%d\n",
+               realPid, realPid + 10000);
+    OutputDebugStringW(dbg);
+    return realPid + 10000;
 }
 
 void HookManagerDialog::Demo_IATHook(HWND hWnd)
@@ -416,92 +420,92 @@ void HookManagerDialog::Demo_IATHook(HWND hWnd)
     ClearResult(hEdit);
     AppendResult(hEdit, L">>> IAT 钩子 (Import Table Hook) Demo\n\n");
 
-    // 获取本模块基址
     HMODULE hMod = GetModuleHandleW(nullptr);
     if (!hMod) {
         AppendResult(hEdit, L"[失败] 无法获取模块基址\n");
         return;
     }
 
-    // 解析 DOS + NT 头
     PIMAGE_DOS_HEADER pDos = (PIMAGE_DOS_HEADER)hMod;
     PIMAGE_NT_HEADERS pNt = (PIMAGE_NT_HEADERS)((BYTE*)hMod + pDos->e_lfanew);
 
-    wchar_t hexBuf[128];
-    swprintf_s(hexBuf, ARRAYSIZE(hexBuf), L"[1] 模块基址: 0x%p, NT头偏移: 0x%X\n", hMod, pDos->e_lfanew);
-    AppendResult(hEdit, hexBuf);
+    wchar_t buf[256];
+    swprintf_s(buf, L"[1] 模块基址: 0x%p  |  架构: %hs\n",
+               hMod,
+#ifdef _M_X64
+               "x64"
+#else
+               "x86"
+#endif
+    );
+    AppendResult(hEdit, buf);
 
-    // 获取导入表 RVA
-    DWORD importRva = 0;
-    if (pNt->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC) {
-        importRva = ((IMAGE_NT_HEADERS64*)pNt)->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
-    } else {
-        importRva = ((IMAGE_NT_HEADERS32*)pNt)->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
-    }
+    // === Step 1: 调用前基准值 ===
+    DWORD pidBefore = GetCurrentProcessId();
+    swprintf_s(buf, L"\n[2] 安装 Hook 前: GetCurrentProcessId() = %d\n", pidBefore);
+    AppendResult(hEdit, buf);
 
-    if (!importRva) {
-        AppendResult(hEdit, L"[失败] 导入表为空\n");
-        return;
-    }
-
-    swprintf_s(hexBuf, ARRAYSIZE(hexBuf), L"[2] 导入表 RVA: 0x%X\n", importRva);
-    AppendResult(hEdit, hexBuf);
-
-    // 尝试安装 IAT Hook
-    AppendResult(hEdit, L"\n[3] 安装 IAT Hook: kernel32.dll!OpenProcess\n");
+    // === Step 2: 安装 IAT Hook ===
+    AppendResult(hEdit, L"\n[3] 安装 IAT Hook: kernel32.dll!GetCurrentProcessId\n");
 
     BOOL hookResult = IatHook(
         hMod,
         "kernel32.dll",
-        "OpenProcess",
-        HookedOpenProcess,
-        (PVOID*)&g_OriginalOpenProcess);
+        "GetCurrentProcessId",
+        (PVOID)HookedGetCurrentProcessId,
+        (PVOID*)&g_OriginalGetCurrentProcessId);
 
-    if (hookResult) {
-        AppendResult(hEdit, L"    成功! 原始 OpenProcess 地址: ");
-        swprintf_s(hexBuf, ARRAYSIZE(hexBuf), L"0x%p\n", g_OriginalOpenProcess);
-        AppendResult(hEdit, hexBuf);
-        AppendResult(hEdit, L"    Hook 函数地址: ");
-        swprintf_s(hexBuf, ARRAYSIZE(hexBuf), L"0x%p\n", HookedOpenProcess);
-        AppendResult(hEdit, hexBuf);
-
-        // 测试: 调用 OpenProcess 触发 Hook
-        AppendResult(hEdit, L"\n[4] 触发 Hook: 调用 OpenProcess(0, FALSE, 4)...\n");
-        HANDLE hProc = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, 21644);
-        if (hProc) {
-            AppendResult(hEdit, L"    OpenProcess 成功 (系统进程句柄)\n");
-            CloseHandle(hProc);
-        } else {
-            AppendResult(hEdit, L"    OpenProcess 失败 (权限不足, 符合预期)\n");
-        }
-
-        // 恢复原始 IAT
-        AppendResult(hEdit, L"\n[5] 卸载 Hook: 恢复 IAT 表...\n");
-        IatHook(
-            hMod,
-            "kernel32.dll",
-            "OpenProcess",
-            g_OriginalOpenProcess,
-            (PVOID*)&g_OriginalOpenProcess);
-        g_OriginalOpenProcess = NULL;
-        AppendResult(hEdit, L"    IAT 已恢复\n");
-    } else {
-        AppendResult(hEdit, L"    失败! 本模块可能未导入 kernel32.dll!OpenProcess\n");
-        AppendResult(hEdit, L"    (提示: 某些项目配置会使用 ntdll!NtOpenProcess 直接调用)\n");
-        // 回退: 展示 IAT 扫描结果
-        AppendResult(hEdit, L"\n[4] 回退: 扫描所有导入模块信息:\n");
-
+    if (!hookResult) {
+        AppendResult(hEdit, L"    [失败] 本模块未导入 kernel32.dll!GetCurrentProcessId\n");
+        AppendResult(hEdit, L"\n    回退: 扫描当前模块导入的 DLL:\n");
+        DWORD importRva = (pNt->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC)
+            ? ((IMAGE_NT_HEADERS64*)pNt)->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress
+            : ((IMAGE_NT_HEADERS32*)pNt)->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
         PIMAGE_IMPORT_DESCRIPTOR pImport = (PIMAGE_IMPORT_DESCRIPTOR)((BYTE*)hMod + importRva);
-        int dllCount = 0;
-        for (; pImport->Name != 0; pImport++, dllCount++) {
-            const char* dllName = (const char*)((BYTE*)hMod + pImport->Name);
-            if (dllCount >= 8) {
-                AppendResult(hEdit, L"    ... (更多)\n");
-                break;
-            }
-            swprintf_s(hexBuf, ARRAYSIZE(hexBuf), L"  [%d] %hs\n", dllCount, dllName);
-            AppendResult(hEdit, hexBuf);
+        for (int i = 0; pImport->Name && i < 10; pImport++, i++) {
+            swprintf_s(buf, L"      [%d] %hs\n", i, (const char*)((BYTE*)hMod + pImport->Name));
+            AppendResult(hEdit, buf);
         }
+        AppendResult(hEdit, L"\n[✗] IAT Hook Demo 无法继续\n");
+        return;
+    }
+
+    swprintf_s(buf, L"    ✓ Hook 已安装\n      原始地址: 0x%p\n      Hook 地址: 0x%p\n",
+               g_OriginalGetCurrentProcessId, HookedGetCurrentProcessId);
+    AppendResult(hEdit, buf);
+
+    // === Step 3: 调用后验证 Hook 生效 ===
+    DWORD pidAfter = GetCurrentProcessId();
+    swprintf_s(buf, L"\n[4] 安装 Hook 后: GetCurrentProcessId() = %d\n", pidAfter);
+    AppendResult(hEdit, buf);
+
+    if (pidAfter == pidBefore + 10000) {
+        swprintf_s(buf, L"    ✓ 验证通过! %d = %d + 10000, Hook 成功拦截!\n",
+                   pidAfter, pidBefore);
+        AppendResult(hEdit, buf);
+    } else {
+        swprintf_s(buf, L"    ✗ 验证失败! 预期=%d, 实际=%d\n", pidBefore + 10000, pidAfter);
+        AppendResult(hEdit, buf);
+    }
+
+    // === Step 4: 卸载 Hook ===
+    AppendResult(hEdit, L"\n[5] 卸载 Hook: 恢复 IAT 表...\n");
+    IatHook(hMod, "kernel32.dll", "GetCurrentProcessId",
+            (PVOID)g_OriginalGetCurrentProcessId,
+            (PVOID*)&g_OriginalGetCurrentProcessId);
+    g_OriginalGetCurrentProcessId = nullptr;
+
+    // === Step 5: 恢复验证 ===
+    DWORD pidRestored = GetCurrentProcessId();
+    swprintf_s(buf, L"[6] 卸载 Hook 后: GetCurrentProcessId() = %d\n", pidRestored);
+    AppendResult(hEdit, buf);
+
+    if (pidRestored == pidBefore) {
+        swprintf_s(buf, L"    ✓ 已恢复! %d == 原始值 %d\n", pidRestored, pidBefore);
+        AppendResult(hEdit, buf);
+    } else {
+        swprintf_s(buf, L"    ✗ 恢复异常! 预期=%d, 实际=%d\n", pidBefore, pidRestored);
+        AppendResult(hEdit, buf);
     }
 
     AppendResult(hEdit, L"\n[✓] IAT 钩子 Demo 完成\n");
