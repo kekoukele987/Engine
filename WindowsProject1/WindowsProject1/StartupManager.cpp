@@ -3,211 +3,659 @@
 #include <winsvc.h>
 #include <shlobj.h>
 #include <shellapi.h>
-#include <vector>
-#include <string>
-#include <set>
+#include <wintrust.h>
+#include <softpub.h>
 
 #pragma comment(lib, "advapi32.lib")
+#pragma comment(lib, "wintrust.lib")
+#pragma comment(lib, "version.lib")
 
 // ===========================================================================
-// Helper: 从注册表读取字符串值
+// Category / Tab definitions
 // ===========================================================================
 
-static std::wstring ReadRegValue(HKEY hKey, const wchar_t* valueName)
-{
-    DWORD type = 0, size = 0;
-    if (RegQueryValueExW(hKey, valueName, nullptr, &type, nullptr, &size) != ERROR_SUCCESS)
-        return {};
-    std::vector<wchar_t> buf(size / sizeof(wchar_t) + 1);
-    if (RegQueryValueExW(hKey, valueName, nullptr, &type,
-                         reinterpret_cast<LPBYTE>(buf.data()), &size) != ERROR_SUCCESS)
-        return {};
-    return buf.data();
+static const StartupCategory kCategories[] = {
+    {StartupType::RegistryRun,            L"Run",          L"Run"},
+    {StartupType::RegistryRunOnce,        L"RunOnce",      L"RunOnce"},
+    {StartupType::RegistryRunOnceEx,      L"RunOnceEx",    L"RunOnceEx"},
+    {StartupType::StartupFolder,          L"启动文件夹",    L"Startup Folder"},
+    {StartupType::PolicyExplorerRun,      L"策略 Run",      L"Policy Run"},
+    {StartupType::ShellExecuteHooks,      L"ShellExecuteHooks", L"ShellExecuteHooks"},
+    {StartupType::ShellServiceObject,     L"Shell 服务对象",   L"Shell Service Obj"},
+    {StartupType::SharedTaskScheduler,    L"共享任务计划",     L"Shared Task Sched"},
+    {StartupType::ApprovedShellExt,       L"Shell 扩展",      L"Shell Extension"},
+    {StartupType::WinlogonShell,          L"Winlogon Shell",   L"Winlogon Shell"},
+    {StartupType::WinlogonUserinit,       L"Winlogon Userinit",L"Winlogon Userinit"},
+    {StartupType::WinlogonNotify,         L"Winlogon Notify",  L"Winlogon Notify"},
+    {StartupType::WinlogonTaskman,        L"Winlogon Taskman", L"Winlogon Taskman"},
+    {StartupType::WinlogonSystem,         L"Winlogon System",  L"Winlogon System"},
+    {StartupType::WinlogonVmApplet,       L"Winlogon VmApplet",L"Winlogon VmApplet"},
+    {StartupType::BrowserHelperObject,    L"BHO",              L"BHO"},
+    {StartupType::Service,                L"服务",             L"Service"},
+    {StartupType::Driver,                 L"驱动",             L"Driver"},
+    {StartupType::ScheduledTask,          L"计划任务",         L"Scheduled Task"},
+    {StartupType::BootExecute,            L"BootExecute",      L"BootExecute"},
+    {StartupType::SessionManagerExecute,  L"SM Execute",       L"SM Execute"},
+    {StartupType::AppInitDLLs,            L"AppInit DLL",      L"AppInit DLL"},
+    {StartupType::KnownDLLs,              L"Known DLL",        L"Known DLL"},
+    {StartupType::LSAAuthPackage,         L"LSA 认证包",       L"LSA Auth Package"},
+    {StartupType::LSANotifyPackage,       L"LSA 通知包",       L"LSA Notify Package"},
+    {StartupType::LSASecurityPackage,     L"LSA 安全包",       L"LSA Security Package"},
+    {StartupType::ImageFileExecOptions,   L"映像劫持",         L"Image Hijack"},
+    {StartupType::PrintMonitor,           L"打印监视器",       L"Print Monitor"},
+    {StartupType::NetworkProvider,        L"网络提供商",       L"Network Provider"},
+    {StartupType::WinsockLSP,             L"Winsock LSP",     L"Winsock LSP"},
+    {StartupType::ActiveSetup,            L"Active Setup",     L"Active Setup"},
+    {StartupType::TerminalServerInstall,  L"终端服务安装",     L"TS Install"},
+    {StartupType::Other,                  L"其他",             L"Other"},
+};
+
+const StartupCategory* GetStartupCategories() { return kCategories; }
+
+static const StartupCategory* FindCategory(StartupType t) {
+    for (auto& c : kCategories) if (c.type == t) return &c;
+    return nullptr;
 }
 
-static std::wstring ReadRegValue(HKEY root, const wchar_t* subKey, const wchar_t* valueName)
+const wchar_t* StartupTypeName(StartupType t) {
+    auto* c = FindCategory(t);
+    return c ? c->nameZh : L"?";
+}
+const wchar_t* StartupTypeNameEn(StartupType t) {
+    auto* c = FindCategory(t);
+    return c ? c->nameEn : L"?";
+}
+
+static const StartupTab kTabs[] = {
+    { L"全部",     L"All",       {} },  // types empty = show all
+    { L"登录",     L"Logon",     {StartupType::RegistryRun, StartupType::RegistryRunOnce,
+                                  StartupType::RegistryRunOnceEx, StartupType::StartupFolder,
+                                  StartupType::PolicyExplorerRun} },
+    { L"Explorer", L"Explorer",  {StartupType::ShellExecuteHooks, StartupType::ShellServiceObject,
+                                  StartupType::SharedTaskScheduler, StartupType::ApprovedShellExt} },
+    { L"Winlogon", L"Winlogon",  {StartupType::WinlogonShell, StartupType::WinlogonUserinit,
+                                  StartupType::WinlogonNotify, StartupType::WinlogonTaskman,
+                                  StartupType::WinlogonSystem, StartupType::WinlogonVmApplet} },
+    { L"服务/驱动",L"Svcs/Drvrs",{StartupType::Service, StartupType::Driver} },
+    { L"计划任务", L"SchTasks",  {StartupType::ScheduledTask} },
+    { L"映像劫持", L"IFEO",      {StartupType::ImageFileExecOptions} },
+    { L"AppInit",  L"AppInit",   {StartupType::AppInitDLLs} },
+    { L"LSA",      L"LSA",       {StartupType::LSAAuthPackage, StartupType::LSANotifyPackage,
+                                  StartupType::LSASecurityPackage} },
+    { L"其他",     L"Other",     {StartupType::BootExecute, StartupType::SessionManagerExecute,
+                                  StartupType::KnownDLLs, StartupType::PrintMonitor,
+                                  StartupType::NetworkProvider, StartupType::WinsockLSP,
+                                  StartupType::ActiveSetup, StartupType::TerminalServerInstall,
+                                  StartupType::BrowserHelperObject, StartupType::Other} },
+};
+
+const std::vector<StartupTab>& GetStartupTabs() {
+    static std::vector<StartupTab> tabs;
+    if (tabs.empty()) {
+        for (auto& t : kTabs) tabs.push_back(t);
+    }
+    return tabs;
+}
+
+// ===========================================================================
+// Helpers
+// ===========================================================================
+
+// Read from HKEY + subKey
+std::wstring StartupManager::ReadRegStr(HKEY root, const wchar_t* subKey,
+                                          const wchar_t* valueName, REGSAM extra)
 {
     HKEY hKey = nullptr;
-    if (RegOpenKeyExW(root, subKey, 0, KEY_READ, &hKey) != ERROR_SUCCESS)
+    if (RegOpenKeyExW(root, subKey, 0, KEY_READ | extra, &hKey) != ERROR_SUCCESS)
         return {};
-    std::wstring result = ReadRegValue(hKey, valueName);
+    DWORD type = 0, size = 0;
+    RegQueryValueExW(hKey, valueName, nullptr, &type, nullptr, &size);
+    std::wstring result;
+    if (type == REG_SZ || type == REG_EXPAND_SZ || type == REG_MULTI_SZ) {
+        std::vector<wchar_t> buf(size / sizeof(wchar_t) + 2);
+        if (RegQueryValueExW(hKey, valueName, nullptr, &type, (LPBYTE)buf.data(), &size) == ERROR_SUCCESS)
+            result = buf.data();
+    }
     RegCloseKey(hKey);
     return result;
 }
-
-// ===========================================================================
-// 注册表 Run / RunOnce
-// ===========================================================================
-
-void StartupManager::EnumRegRunValues(HKEY root, const wchar_t* subKey,
-                                       StartupType type,
-                                       std::vector<StartupEntry>& results,
-                                       bool is64)
+// Read from already-open HKEY
+std::wstring StartupManager::ReadRegStr(HKEY hKey, const wchar_t* valueName)
 {
-    REGSAM sam = KEY_READ | (is64 ? KEY_WOW64_64KEY : KEY_WOW64_32KEY);
+    DWORD type = 0, size = 0;
+    RegQueryValueExW(hKey, valueName, nullptr, &type, nullptr, &size);
+    std::wstring result;
+    if (type == REG_SZ || type == REG_EXPAND_SZ || type == REG_MULTI_SZ) {
+        std::vector<wchar_t> buf(size / sizeof(wchar_t) + 2);
+        if (RegQueryValueExW(hKey, valueName, nullptr, &type, (LPBYTE)buf.data(), &size) == ERROR_SUCCESS)
+            result = buf.data();
+    }
+    return result;
+}
+
+void StartupManager::EnumRegValues(HKEY root, const wchar_t* subKey,
+                                    StartupType type,
+                                    std::vector<StartupEntry>& results, REGSAM extra)
+{
     HKEY hKey = nullptr;
-    if (RegOpenKeyExW(root, subKey, 0, sam, &hKey) != ERROR_SUCCESS) return;
+    if (RegOpenKeyExW(root, subKey, 0, KEY_READ | extra, &hKey) != ERROR_SUCCESS) return;
 
-    wchar_t valueName[1024];
-    DWORD vnLen = 1024;
-    BYTE data[4096];
-    DWORD dataLen = sizeof(data);
-    DWORD typeVal;
-    DWORD index = 0;
-
-    while (RegEnumValueW(hKey, index, valueName, &vnLen,
-                         nullptr, &typeVal, data, &dataLen) == ERROR_SUCCESS)
-    {
-        if (typeVal == REG_SZ || typeVal == REG_EXPAND_SZ) {
+    wchar_t vn[1024]; DWORD vnLen; BYTE data[8192]; DWORD dataLen, vt; DWORD idx = 0;
+    while (true) {
+        vnLen = 1024; dataLen = sizeof(data);
+        if (RegEnumValueW(hKey, idx, vn, &vnLen, nullptr, &vt, data, &dataLen) != ERROR_SUCCESS) break;
+        if (vt == REG_SZ || vt == REG_EXPAND_SZ) {
             StartupEntry e;
-            e.name     = valueName;
-            e.command  = reinterpret_cast<wchar_t*>(data);
-            e.location = std::wstring(subKey) + L"\\" + valueName;
-            e.type     = type;
-            e.enabled  = true;
-            e.is64Bit  = is64;
+            e.name = vn;
+            e.command = (wchar_t*)data;
+            e.location = std::wstring(subKey) + L"\\" + vn;
+            e.type = type;
             results.push_back(std::move(e));
         }
-        vnLen = 1024; dataLen = sizeof(data);
-        ++index;
+        idx++;
     }
     RegCloseKey(hKey);
 }
 
-void StartupManager::ScanRegistryRun(std::vector<StartupEntry>& results)
+void StartupManager::EnumRegSubKeysData(HKEY root, const wchar_t* subKey,
+                                          StartupType type, const wchar_t* valName,
+                                          std::vector<StartupEntry>& results, REGSAM extra)
 {
-    // HKLM (64/32 bit)
-    EnumRegRunValues(HKEY_LOCAL_MACHINE,
-        L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run",
-        StartupType::RegistryRun, results, true);
-    EnumRegRunValues(HKEY_LOCAL_MACHINE,
-        L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run",
-        StartupType::RegistryRun, results, false);
-    // HKCU
-    EnumRegRunValues(HKEY_CURRENT_USER,
-        L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run",
-        StartupType::RegistryRun, results);
+    HKEY hKey = nullptr;
+    if (RegOpenKeyExW(root, subKey, 0, KEY_READ | extra, &hKey) != ERROR_SUCCESS) return;
+
+    wchar_t kn[1024]; DWORD knLen; DWORD idx = 0;
+    while (true) {
+        knLen = 1024;
+        if (RegEnumKeyExW(hKey, idx, kn, &knLen, nullptr, nullptr, nullptr, nullptr) != ERROR_SUCCESS) break;
+        HKEY hSub = nullptr;
+        if (RegOpenKeyExW(hKey, kn, 0, KEY_READ, &hSub) == ERROR_SUCCESS) {
+            std::wstring data = ReadRegStr(hSub, valName);
+            if (!data.empty()) {
+                StartupEntry e;
+                e.name = kn;
+                e.command = data;
+                e.location = std::wstring(subKey) + L"\\" + kn;
+                e.type = type;
+                results.push_back(std::move(e));
+            }
+            RegCloseKey(hSub);
+        }
+        idx++;
+    }
+    RegCloseKey(hKey);
 }
 
-void StartupManager::ScanRegistryRunOnce(std::vector<StartupEntry>& results)
+void StartupManager::EnumRegSubKeysMulti(HKEY root, const wchar_t* subKey,
+                                           StartupType type, const wchar_t* valName,
+                                           std::vector<StartupEntry>& results, REGSAM extra)
 {
-    EnumRegRunValues(HKEY_LOCAL_MACHINE,
-        L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\RunOnce",
-        StartupType::RegistryRunOnce, results, true);
-    EnumRegRunValues(HKEY_LOCAL_MACHINE,
-        L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\RunOnce",
-        StartupType::RegistryRunOnce, results, false);
-    EnumRegRunValues(HKEY_CURRENT_USER,
-        L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\RunOnce",
-        StartupType::RegistryRunOnce, results);
+    // Same as EnumRegSubKeysData but valName yields REG_MULTI_SZ or REG_SZ data
+    // For locations like Winlogon\Notify where each subkey has DLL entries
+    HKEY hKey = nullptr;
+    if (RegOpenKeyExW(root, subKey, 0, KEY_READ | extra, &hKey) != ERROR_SUCCESS) return;
+
+    wchar_t kn[1024]; DWORD knLen; DWORD idx = 0;
+    while (true) {
+        knLen = 1024;
+        if (RegEnumKeyExW(hKey, idx, kn, &knLen, nullptr, nullptr, nullptr, nullptr) != ERROR_SUCCESS) break;
+        HKEY hSub = nullptr;
+        if (RegOpenKeyExW(hKey, kn, 0, KEY_READ, &hSub) == ERROR_SUCCESS) {
+            auto addEntry = [&](const std::wstring& data) {
+                if (!data.empty()) {
+                    StartupEntry e;
+                    e.name = kn;
+                    e.command = data;
+                    e.location = std::wstring(subKey) + L"\\" + kn + L"\\" + valName;
+                    e.type = type;
+                    results.push_back(std::move(e));
+                }
+            };
+            // Check single string value
+            std::wstring sv = ReadRegStr(hSub, valName);
+            if (!sv.empty()) {
+                addEntry(sv);
+            }
+            // Check multiple named DLL values (DllName, Asynchronous, etc.)
+            for (auto* vn : {L"DllName", L"Asynchronous", L"Startup"}) {
+                std::wstring dv = ReadRegStr(hSub, vn);
+                if (!dv.empty() && dv != sv)
+                    addEntry(dv);
+            }
+            RegCloseKey(hSub);
+        }
+        idx++;
+    }
+    RegCloseKey(hKey);
 }
 
 // ===========================================================================
-// 启动文件夹
+// Signature check
 // ===========================================================================
 
-void StartupManager::ScanStartupFolders(std::vector<StartupEntry>& results)
-{
-    // 常见启动文件夹路径
-    const int kFolders[] = {
-        CSIDL_STARTUP,           // 当前用户启动文件夹
-        CSIDL_COMMON_STARTUP,    // 公共启动文件夹
+void StartupManager::CheckSignature(StartupEntry& e) {
+    std::wstring path = e.command;
+    // Strip arguments and quotes
+    if (!path.empty() && path[0] == L'"') {
+        auto pos = path.find(L'"', 1);
+        if (pos != std::wstring::npos) path = path.substr(1, pos - 1);
+    } else {
+        auto pos = path.find(L' ');
+        if (pos != std::wstring::npos) path = path.substr(0, pos);
+    }
+    // Quick check: does file exist?
+    if (GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) return;
+
+    WINTRUST_FILE_INFO fi = {};
+    fi.cbStruct = sizeof(fi);
+    fi.pcwszFilePath = path.c_str();
+
+    WINTRUST_DATA wtd = {};
+    wtd.cbStruct = sizeof(wtd);
+    wtd.dwUIChoice = WTD_UI_NONE;
+    wtd.fdwRevocationChecks = WTD_REVOKE_NONE;
+    wtd.dwUnionChoice = WTD_CHOICE_FILE;
+    wtd.pFile = &fi;
+    wtd.dwStateAction = WTD_STATEACTION_VERIFY;
+
+    GUID policy = WINTRUST_ACTION_GENERIC_VERIFY_V2;
+    LONG st = WinVerifyTrust((HWND)INVALID_HANDLE_VALUE, &policy, &wtd);
+
+    // Query publisher name
+    wtd.dwStateAction = WTD_STATEACTION_CLOSE;
+    if (st == ERROR_SUCCESS) {
+        e.verified = true;
+
+        // Try to get publisher from file version info
+        DWORD h;
+        DWORD sz = GetFileVersionInfoSizeW(path.c_str(), &h);
+        if (sz) {
+            std::vector<BYTE> vi(sz);
+            if (GetFileVersionInfoW(path.c_str(), 0, sz, vi.data())) {
+                struct LANGANDCODEPAGE { WORD lang; WORD code; } *lp;
+                UINT cb;
+                if (VerQueryValueW(vi.data(), L"\\VarFileInfo\\Translation", (LPVOID*)&lp, &cb) && cb >= sizeof(*lp)) {
+                    wchar_t q[128];
+                    swprintf_s(q, L"\\StringFileInfo\\%04x%04x\\CompanyName", lp->lang, lp->code);
+                    wchar_t* company = nullptr;
+                    if (VerQueryValueW(vi.data(), q, (LPVOID*)&company, &cb) && company)
+                        e.publisher = company;
+                }
+            }
+        }
+    }
+    WinVerifyTrust((HWND)INVALID_HANDLE_VALUE, &policy, &wtd);
+}
+
+// ===========================================================================
+// 1. Logon: Run / RunOnce / RunOnceEx / Startup folders / Policy
+// ===========================================================================
+
+void StartupManager::ScanLogon(std::vector<StartupEntry>& r) {
+    const wchar_t* roots[][2] = {
+        { L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run",       nullptr },
+        { L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\RunOnce",   nullptr },
+        { L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\RunOnceEx", nullptr },
+        { L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer\\Run", nullptr },
     };
 
-    for (int csidl : kFolders) {
+    for (auto& kv : roots) {
+        EnumRegValues(HKEY_LOCAL_MACHINE, kv[0], StartupType::RegistryRun, r, KEY_WOW64_64KEY);
+        EnumRegValues(HKEY_LOCAL_MACHINE, kv[0], StartupType::RegistryRun, r, KEY_WOW64_32KEY);
+        EnumRegValues(HKEY_CURRENT_USER,  kv[0], StartupType::RegistryRun, r);
+    }
+
+    // Startup folders
+    for (int csidl : {CSIDL_STARTUP, CSIDL_COMMON_STARTUP}) {
         wchar_t path[MAX_PATH];
-        if (SHGetFolderPathW(nullptr, csidl, nullptr, SHGFP_TYPE_CURRENT, path) != S_OK)
-            continue;
-
-        std::wstring dir = path;
+        if (FAILED(SHGetFolderPathW(nullptr, csidl, nullptr, SHGFP_TYPE_CURRENT, path))) continue;
         WIN32_FIND_DATAW fd;
-        HANDLE hFind = FindFirstFileW((dir + L"\\*").c_str(), &fd);
-        if (hFind == INVALID_HANDLE_VALUE) continue;
-
+        HANDLE h = FindFirstFileW((std::wstring(path) + L"\\*").c_str(), &fd);
+        if (h == INVALID_HANDLE_VALUE) continue;
         do {
             if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
             if (wcscmp(fd.cFileName, L".") == 0 || wcscmp(fd.cFileName, L"..") == 0) continue;
-
             StartupEntry e;
-            e.name     = fd.cFileName;
-            e.command  = dir + L"\\" + fd.cFileName;
-            e.location = e.command;
-            e.type     = StartupType::StartupFolder;
-            e.enabled  = !(fd.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN);
-            results.push_back(std::move(e));
-        } while (FindNextFileW(hFind, &fd));
-        FindClose(hFind);
+            e.name = fd.cFileName;
+            e.command = std::wstring(path) + L"\\" + fd.cFileName;
+            e.location = path;
+            e.type = StartupType::StartupFolder;
+            r.push_back(std::move(e));
+        } while (FindNextFileW(h, &fd));
+        FindClose(h);
     }
 }
 
 // ===========================================================================
-// ShellExecuteHooks
+// 2. Explorer: ShellExecuteHooks, SSODL, SharedTaskScheduler, Approved Ext
 // ===========================================================================
 
-void StartupManager::EnumRegSubKeys(HKEY root, const wchar_t* subKey,
-                                     StartupType type, const wchar_t* valueName,
-                                     std::vector<StartupEntry>& results, bool is64)
-{
-    REGSAM sam = KEY_READ | (is64 ? KEY_WOW64_64KEY : KEY_WOW64_32KEY);
-    HKEY hKey = nullptr;
-    if (RegOpenKeyExW(root, subKey, 0, sam, &hKey) != ERROR_SUCCESS) return;
+void StartupManager::ScanExplorer(std::vector<StartupEntry>& r) {
+    // ShellExecuteHooks
+    for (auto sam : {KEY_WOW64_64KEY, KEY_WOW64_32KEY}) {
+        EnumRegSubKeysData(HKEY_LOCAL_MACHINE,
+            L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\ShellExecuteHooks",
+            StartupType::ShellExecuteHooks, L"", r, sam);
+    }
 
-    wchar_t keyName[1024];
-    DWORD knLen = 1024;
-    DWORD index = 0;
-    FILETIME ft;
+    // ShellServiceObjectDelayLoad
+    for (auto sam : {KEY_WOW64_64KEY, KEY_WOW64_32KEY}) {
+        EnumRegSubKeysData(HKEY_LOCAL_MACHINE,
+            L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\ShellServiceObjectDelayLoad",
+            StartupType::ShellServiceObject, L"", r, sam);
+    }
 
-    while (RegEnumKeyExW(hKey, index, keyName, &knLen, nullptr, nullptr, nullptr, &ft) == ERROR_SUCCESS) {
-        HKEY hSub = nullptr;
-        if (RegOpenKeyExW(hKey, keyName, 0, KEY_READ, &hSub) == ERROR_SUCCESS) {
+    // SharedTaskScheduler
+    for (auto sam : {KEY_WOW64_64KEY, KEY_WOW64_32KEY}) {
+        EnumRegSubKeysData(HKEY_LOCAL_MACHINE,
+            L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\SharedTaskScheduler",
+            StartupType::SharedTaskScheduler, L"", r, sam);
+    }
+
+    // Approved Shell Extensions (context menu handlers, property sheets, etc.)
+    for (auto sam : {KEY_WOW64_64KEY, KEY_WOW64_32KEY}) {
+        EnumRegSubKeysData(HKEY_LOCAL_MACHINE,
+            L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Shell Extensions\\Approved",
+            StartupType::ApprovedShellExt, L"", r, sam);
+    }
+}
+
+// ===========================================================================
+// 3. Winlogon: Shell, Userinit, Notify, Taskman, System, VmApplet
+// ===========================================================================
+
+void StartupManager::ScanWinlogon(std::vector<StartupEntry>& r) {
+    const wchar_t* kWL = L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon";
+
+    auto addIfNotDefault = [&](const wchar_t* val, const wchar_t* def, StartupType t) {
+        std::wstring v = ReadRegStr(HKEY_LOCAL_MACHINE, kWL, val);
+        if (!v.empty() && _wcsicmp(v.c_str(), def) != 0) {
             StartupEntry e;
-            e.name     = keyName;
-            e.command  = ReadRegValue(hSub, valueName);
-            e.location = std::wstring(subKey) + L"\\" + keyName;
-            e.type     = type;
-            e.enabled  = true;
-            e.is64Bit  = is64;
-            if (!e.command.empty())
-                results.push_back(std::move(e));
+            e.name = val;
+            e.command = v;
+            e.location = std::wstring(kWL) + L"\\" + val;
+            e.type = t;
+            r.push_back(std::move(e));
+        }
+    };
+
+    // Shell (default: explorer.exe)
+    std::wstring shell = ReadRegStr(HKEY_LOCAL_MACHINE, kWL, L"Shell");
+    if (!shell.empty()) {
+        StartupEntry e;
+        e.name = L"Shell";
+        e.command = shell;
+        e.location = std::wstring(kWL) + L"\\Shell";
+        e.type = StartupType::WinlogonShell;
+        r.push_back(std::move(e));
+    }
+
+    // Userinit — parse comma-separated
+    std::wstring ui = ReadRegStr(HKEY_LOCAL_MACHINE, kWL, L"Userinit");
+    size_t pos = 0;
+    while (pos < ui.size()) {
+        auto cp = ui.find(L',', pos);
+        std::wstring part = (cp == std::wstring::npos) ? ui.substr(pos) : ui.substr(pos, cp - pos);
+        while (!part.empty() && part[0] == L' ') part.erase(0, 1);
+        while (!part.empty() && part.back() == L' ') part.pop_back();
+        if (!part.empty()) {
+            StartupEntry e;
+            e.name = L"Userinit";
+            e.command = part;
+            e.location = std::wstring(kWL) + L"\\Userinit";
+            e.type = StartupType::WinlogonUserinit;
+            r.push_back(std::move(e));
+        }
+        if (cp == std::wstring::npos) break;
+        pos = cp + 1;
+    }
+
+    // Winlogon extras
+    addIfNotDefault(L"Taskman",  L"taskmgr.exe", StartupType::WinlogonTaskman);
+    addIfNotDefault(L"System",   L"",           StartupType::WinlogonSystem);
+    addIfNotDefault(L"VmApplet", L"",           StartupType::WinlogonVmApplet);
+
+    // Notify packages
+    std::wstring notifyPath = std::wstring(kWL) + L"\\Notify";
+    EnumRegSubKeysMulti(HKEY_LOCAL_MACHINE, notifyPath.c_str(),
+                         StartupType::WinlogonNotify, L"DllName", r);
+}
+
+// ===========================================================================
+// 4. BHO
+// ===========================================================================
+
+void StartupManager::ScanBHO(std::vector<StartupEntry>& r) {
+    for (auto sam : {KEY_WOW64_64KEY, KEY_WOW64_32KEY}) {
+        EnumRegSubKeysData(HKEY_LOCAL_MACHINE,
+            L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Browser Helper Objects",
+            StartupType::BrowserHelperObject, L"", r, sam);
+    }
+}
+
+// ===========================================================================
+// 5. Services (auto-start)
+// ===========================================================================
+
+void StartupManager::ScanServices(std::vector<StartupEntry>& r) {
+    SC_HANDLE scm = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_ENUMERATE_SERVICE);
+    if (!scm) return;
+
+    DWORD needed = 0, count = 0;
+    EnumServicesStatusExW(scm, SC_ENUM_PROCESS_INFO, SERVICE_WIN32,
+                          SERVICE_STATE_ALL, nullptr, 0, &needed, &count, nullptr, nullptr);
+    if (!needed) { CloseServiceHandle(scm); return; }
+
+    std::vector<BYTE> buf(needed + 4096);
+    auto* svcs = (LPENUM_SERVICE_STATUS_PROCESSW)buf.data();
+    if (!EnumServicesStatusExW(scm, SC_ENUM_PROCESS_INFO, SERVICE_WIN32,
+                               SERVICE_STATE_ALL, buf.data(), (DWORD)buf.size(),
+                               &needed, &count, nullptr, nullptr)) {
+        CloseServiceHandle(scm); return;
+    }
+
+    for (DWORD i = 0; i < count; i++) {
+        if (svcs[i].ServiceStatusProcess.dwServiceType == SERVICE_WIN32_OWN_PROCESS ||
+            svcs[i].ServiceStatusProcess.dwServiceType == SERVICE_WIN32_SHARE_PROCESS) {
+            SC_HANDLE svc = OpenServiceW(scm, svcs[i].lpServiceName, SERVICE_QUERY_CONFIG);
+            if (!svc) continue;
+
+            DWORD cs = 0;
+            QueryServiceConfigW(svc, nullptr, 0, &cs);
+            std::vector<BYTE> cfg(cs + 256);
+            auto* sc = (LPQUERY_SERVICE_CONFIGW)cfg.data();
+            if (QueryServiceConfigW(svc, sc, (DWORD)cfg.size(), &cs)) {
+                if (sc->dwStartType == SERVICE_AUTO_START ||
+                    sc->dwStartType == SERVICE_DEMAND_START ||
+                    sc->dwStartType == 0x96) { // delayed auto-start
+                    StartupEntry e;
+                    e.name = svcs[i].lpServiceName;
+                    e.command = sc->lpBinaryPathName ? sc->lpBinaryPathName : L"";
+                    e.location = std::wstring(L"服务: ") + svcs[i].lpServiceName;
+                    e.type = StartupType::Service;
+                    e.enabled = (sc->dwStartType != SERVICE_DISABLED);
+                    e.description = svcs[i].lpDisplayName;
+                    r.push_back(std::move(e));
+                }
+            }
+            CloseServiceHandle(svc);
+        }
+    }
+    CloseServiceHandle(scm);
+}
+
+// ===========================================================================
+// 6. Drivers (kernel — boot/system start)
+// ===========================================================================
+
+void StartupManager::ScanDrivers(std::vector<StartupEntry>& r) {
+    SC_HANDLE scm = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_ENUMERATE_SERVICE);
+    if (!scm) return;
+
+    DWORD needed = 0, count = 0;
+    EnumServicesStatusExW(scm, SC_ENUM_PROCESS_INFO, SERVICE_DRIVER,
+                          SERVICE_STATE_ALL, nullptr, 0, &needed, &count, nullptr, nullptr);
+    if (!needed) { CloseServiceHandle(scm); return; }
+
+    std::vector<BYTE> buf(needed + 4096);
+    auto* drvs = (LPENUM_SERVICE_STATUS_PROCESSW)buf.data();
+    if (!EnumServicesStatusExW(scm, SC_ENUM_PROCESS_INFO, SERVICE_DRIVER,
+                               SERVICE_STATE_ALL, buf.data(), (DWORD)buf.size(),
+                               &needed, &count, nullptr, nullptr)) {
+        CloseServiceHandle(scm); return;
+    }
+
+    for (DWORD i = 0; i < count; i++) {
+        if (drvs[i].ServiceStatusProcess.dwServiceType == SERVICE_KERNEL_DRIVER ||
+            drvs[i].ServiceStatusProcess.dwServiceType == SERVICE_FILE_SYSTEM_DRIVER) {
+            SC_HANDLE svc = OpenServiceW(scm, drvs[i].lpServiceName, SERVICE_QUERY_CONFIG);
+            if (!svc) continue;
+            DWORD cs = 0;
+            QueryServiceConfigW(svc, nullptr, 0, &cs);
+            std::vector<BYTE> cfg(cs + 256);
+            auto* sc = (LPQUERY_SERVICE_CONFIGW)cfg.data();
+            if (QueryServiceConfigW(svc, sc, (DWORD)cfg.size(), &cs)) {
+                if (sc->dwStartType == SERVICE_BOOT_START ||
+                    sc->dwStartType == SERVICE_SYSTEM_START ||
+                    sc->dwStartType == SERVICE_AUTO_START) {
+                    StartupEntry e;
+                    e.name = drvs[i].lpServiceName;
+                    e.command = sc->lpBinaryPathName ? sc->lpBinaryPathName : L"";
+                    e.location = std::wstring(L"驱动: ") + drvs[i].lpServiceName;
+                    e.type = StartupType::Driver;
+                    e.description = drvs[i].lpDisplayName;
+                    r.push_back(std::move(e));
+                }
+            }
+            CloseServiceHandle(svc);
+        }
+    }
+    CloseServiceHandle(scm);
+}
+
+// ===========================================================================
+// 7. Scheduled Tasks
+// ===========================================================================
+
+void StartupManager::ScanScheduledTasks(std::vector<StartupEntry>& r) {
+    HKEY hKey = nullptr;
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE,
+            L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Schedule\\TaskCache\\Tasks",
+            0, KEY_READ, &hKey) != ERROR_SUCCESS) return;
+
+    wchar_t kn[1024];
+    for (DWORD idx = 0; ; idx++) {
+        DWORD knLen = 1024;
+        if (RegEnumKeyExW(hKey, idx, kn, &knLen, nullptr, nullptr, nullptr, nullptr) != ERROR_SUCCESS) break;
+        HKEY hSub = nullptr;
+        if (RegOpenKeyExW(hKey, kn, 0, KEY_READ, &hSub) == ERROR_SUCCESS) {
+            std::wstring path = ReadRegStr(hSub, L"Path");
+            std::wstring actions = ReadRegStr(hSub, L"Actions");
+            if (!path.empty()) {
+                StartupEntry e;
+                e.name = path;
+                e.command = actions.empty() ? path : actions;
+                e.location = L"Task: " + path;
+                e.type = StartupType::ScheduledTask;
+                r.push_back(std::move(e));
+            }
             RegCloseKey(hSub);
         }
-        knLen = 1024;
-        ++index;
     }
     RegCloseKey(hKey);
-}
 
-void StartupManager::ScanShellExecuteHooks(std::vector<StartupEntry>& results)
-{
-    EnumRegSubKeys(HKEY_LOCAL_MACHINE,
-        L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\ShellExecuteHooks",
-        StartupType::ShellExecuteHooks, L"", results, true);
-    EnumRegSubKeys(HKEY_LOCAL_MACHINE,
-        L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\ShellExecuteHooks",
-        StartupType::ShellExecuteHooks, L"", results, false);
+    // Also scan HKCU\Software\...\TaskCache\Tasks
+    if (RegOpenKeyExW(HKEY_CURRENT_USER,
+            L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Schedule\\TaskCache\\Tasks",
+            0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+        for (DWORD idx = 0; ; idx++) {
+            DWORD knLen = 1024;
+            if (RegEnumKeyExW(hKey, idx, kn, &knLen, nullptr, nullptr, nullptr, nullptr) != ERROR_SUCCESS) break;
+            HKEY hSub = nullptr;
+            if (RegOpenKeyExW(hKey, kn, 0, KEY_READ, &hSub) == ERROR_SUCCESS) {
+                std::wstring path = ReadRegStr(hSub, L"Path");
+                std::wstring actions = ReadRegStr(hSub, L"Actions");
+                if (!path.empty()) {
+                    StartupEntry e;
+                    e.name = path;
+                    e.command = actions.empty() ? path : actions;
+                    e.location = L"Task (HKCU): " + path;
+                    e.type = StartupType::ScheduledTask;
+                    r.push_back(std::move(e));
+                }
+                RegCloseKey(hSub);
+            }
+        }
+        RegCloseKey(hKey);
+    }
 }
 
 // ===========================================================================
-// AppInit_DLLs
+// 8. BootExecute + Session Manager Execute
 // ===========================================================================
 
-void StartupManager::ScanAppInitDLLs(std::vector<StartupEntry>& results)
-{
-    std::wstring dlls = ReadRegValue(HKEY_LOCAL_MACHINE,
-        L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Windows",
-        L"AppInit_DLLs");
-    if (!dlls.empty()) {
+void StartupManager::ScanBootExecute(std::vector<StartupEntry>& r) {
+    const wchar_t* kSM = L"SYSTEM\\CurrentControlSet\\Control\\Session Manager";
+    HKEY hKey;
+
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, kSM, 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+        // BootExecute
+        std::wstring be = ReadRegStr(hKey, L"BootExecute");
+        if (!be.empty()) {
+            // REG_MULTI_SZ — parse null-terminated strings
+            for (const wchar_t* p = be.c_str(); *p; p += wcslen(p) + 1) {
+                std::wstring cmd(p);
+                if (!cmd.empty() && cmd != L"autocheck autochk *") {
+                    StartupEntry e;
+                    e.name = cmd;
+                    e.command = cmd;
+                    e.location = std::wstring(kSM) + L"\\BootExecute";
+                    e.type = StartupType::BootExecute;
+                    r.push_back(std::move(e));
+                }
+            }
+        }
+        // Execute (SetupExecute)
+        std::wstring se = ReadRegStr(hKey, L"Execute");
+        if (!se.empty()) {
+            for (const wchar_t* p = se.c_str(); *p; p += wcslen(p) + 1) {
+                std::wstring cmd(p);
+                if (!cmd.empty()) {
+                    StartupEntry e;
+                    e.name = cmd;
+                    e.command = cmd;
+                    e.location = std::wstring(kSM) + L"\\Execute";
+                    e.type = StartupType::SessionManagerExecute;
+                    r.push_back(std::move(e));
+                }
+            }
+        }
+        RegCloseKey(hKey);
+    }
+}
+
+// ===========================================================================
+// 9. AppInit_DLLs + LoadAppInit_DLLs
+// ===========================================================================
+
+void StartupManager::ScanAppInit(std::vector<StartupEntry>& r) {
+    const wchar_t* kWin = L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Windows";
+    std::wstring dlls = ReadRegStr(HKEY_LOCAL_MACHINE, kWin, L"AppInit_DLLs");
+    std::wstring load = ReadRegStr(HKEY_LOCAL_MACHINE, kWin, L"LoadAppInit_DLLs");
+
+    if (!dlls.empty() && load == L"1") {
         size_t pos = 0;
         while (pos < dlls.size()) {
             auto sp = dlls.find(L' ', pos);
             std::wstring dll = (sp == std::wstring::npos) ? dlls.substr(pos) : dlls.substr(pos, sp - pos);
+            while (!dll.empty() && dll[0] == L' ') dll.erase(0, 1);
             if (!dll.empty()) {
                 StartupEntry e;
-                e.name     = dll;
-                e.command  = dll;
-                e.location = L"HKLM\\...\\Windows\\AppInit_DLLs";
-                e.type     = StartupType::AppInitDLLs;
-                results.push_back(std::move(e));
+                e.name = dll;
+                e.command = dll;
+                e.location = std::wstring(kWin) + L"\\AppInit_DLLs";
+                e.type = StartupType::AppInitDLLs;
+                r.push_back(std::move(e));
             }
             if (sp == std::wstring::npos) break;
             pos = sp + 1;
@@ -216,324 +664,238 @@ void StartupManager::ScanAppInitDLLs(std::vector<StartupEntry>& results)
 }
 
 // ===========================================================================
-// BootExecute
+// 10. KnownDLLs
 // ===========================================================================
 
-void StartupManager::ScanBootExecute(std::vector<StartupEntry>& results)
-{
-    HKEY hKey = nullptr;
-    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE,
-            L"SYSTEM\\CurrentControlSet\\Control\\Session Manager",
-            0, KEY_READ, &hKey) != ERROR_SUCCESS) return;
-
-    DWORD type = 0, size = 0;
-    RegQueryValueExW(hKey, L"BootExecute", nullptr, &type, nullptr, &size);
-    if (type == REG_MULTI_SZ && size > 0) {
-        std::vector<wchar_t> buf(size / sizeof(wchar_t) + 1);
-        if (RegQueryValueExW(hKey, L"BootExecute", nullptr, &type,
-                             reinterpret_cast<LPBYTE>(buf.data()), &size) == ERROR_SUCCESS)
-        {
-            const wchar_t* p = buf.data();
-            while (*p) {
-                std::wstring cmd(p);
-                if (!cmd.empty() && cmd != L"autocheck autochk *") {
-                    StartupEntry e;
-                    e.name     = cmd;
-                    e.command  = cmd;
-                    e.location = L"HKLM\\...\\Session Manager\\BootExecute";
-                    e.type     = StartupType::BootExecute;
-                    results.push_back(std::move(e));
-                }
-                p += wcslen(p) + 1;
+void StartupManager::ScanKnownDLLs(std::vector<StartupEntry>& r) {
+    const wchar_t* kKD = L"SYSTEM\\CurrentControlSet\\Control\\Session Manager\\KnownDLLs";
+    HKEY hKey;
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, kKD, 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+        wchar_t vn[1024]; DWORD vnLen; BYTE data[4096]; DWORD dataLen, vt; DWORD idx = 0;
+        while (true) {
+            vnLen = 1024; dataLen = sizeof(data);
+            if (RegEnumValueW(hKey, idx, vn, &vnLen, nullptr, &vt, data, &dataLen) != ERROR_SUCCESS) break;
+            if (vt == REG_SZ) {
+                StartupEntry e;
+                e.name = vn;
+                e.command = (wchar_t*)data;
+                e.location = std::wstring(kKD);
+                e.type = StartupType::KnownDLLs;
+                r.push_back(std::move(e));
             }
+            idx++;
         }
+        RegCloseKey(hKey);
     }
-    RegCloseKey(hKey);
 }
 
 // ===========================================================================
-// 服务
+// 11. LSA Providers
 // ===========================================================================
 
-void StartupManager::ScanServices(std::vector<StartupEntry>& results)
-{
-    SC_HANDLE scm = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_ENUMERATE_SERVICE);
-    if (!scm) return;
+void StartupManager::ScanLSA(std::vector<StartupEntry>& r) {
+    const wchar_t* kLSA = L"SYSTEM\\CurrentControlSet\\Control\\Lsa";
 
-    DWORD bufSize = 0, needed = 0, count = 0;
-    EnumServicesStatusExW(scm, SC_ENUM_PROCESS_INFO, SERVICE_WIN32,
-                          SERVICE_ACTIVE, nullptr, 0, &needed, &count, nullptr, nullptr);
-    if (needed == 0) { CloseServiceHandle(scm); return; }
-
-    std::vector<BYTE> buf(needed + 1024);
-    LPENUM_SERVICE_STATUS_PROCESSW pServices =
-        reinterpret_cast<LPENUM_SERVICE_STATUS_PROCESSW>(buf.data());
-
-    if (EnumServicesStatusExW(scm, SC_ENUM_PROCESS_INFO, SERVICE_WIN32,
-                              SERVICE_ACTIVE, buf.data(), (DWORD)buf.size(),
-                              &needed, &count, nullptr, nullptr))
-    {
-        for (DWORD i = 0; i < count; ++i) {
-            // 只关注自动启动或自动延迟启动的服务
-            if (pServices[i].ServiceStatusProcess.dwServiceType == SERVICE_WIN32_OWN_PROCESS ||
-                pServices[i].ServiceStatusProcess.dwServiceType == SERVICE_WIN32_SHARE_PROCESS)
-            {
-                // 查询服务配置获取启动类型
-                SC_HANDLE svc = OpenServiceW(scm, pServices[i].lpServiceName, SERVICE_QUERY_CONFIG);
-                if (svc) {
-                    DWORD cfgSize = 0;
-                    QueryServiceConfigW(svc, nullptr, 0, &cfgSize);
-                    std::vector<BYTE> cfgBuf(cfgSize + 256);
-                    LPQUERY_SERVICE_CONFIGW cfg = reinterpret_cast<LPQUERY_SERVICE_CONFIGW>(cfgBuf.data());
-                    if (QueryServiceConfigW(svc, cfg, (DWORD)cfgBuf.size(), &cfgSize)) {
-                        if (cfg->dwStartType == SERVICE_AUTO_START ||
-                            cfg->dwStartType == 0x96 ||  // SERVICE_DELAYED_AUTO_START
-                            cfg->dwStartType == SERVICE_BOOT_START ||
-                            cfg->dwStartType == SERVICE_SYSTEM_START)
-                        {
-                            StartupEntry e;
-                            e.name     = pServices[i].lpServiceName;
-                            e.command  = cfg->lpBinaryPathName ? cfg->lpBinaryPathName : L"";
-                            e.location = std::wstring(L"服务: ") + pServices[i].lpServiceName;
-                            e.type     = StartupType::Service;
-                            e.enabled  = (cfg->dwStartType != SERVICE_DISABLED);
-                            e.description = pServices[i].lpDisplayName;
-                            results.push_back(std::move(e));
-                        }
-                    }
-                    CloseServiceHandle(svc);
-                }
-            }
-        }
-    }
-    CloseServiceHandle(scm);
-}
-
-// ===========================================================================
-// Winlogon Shell / Userinit
-// ===========================================================================
-
-void StartupManager::ScanWinlogon(std::vector<StartupEntry>& results)
-{
-    const wchar_t* kWinlogonPath = L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon";
-
-    // Shell
-    std::wstring shell = ReadRegValue(HKEY_LOCAL_MACHINE, kWinlogonPath, L"Shell");
-    if (!shell.empty() && shell != L"explorer.exe") {
-        StartupEntry e;
-        e.name     = L"Shell";
-        e.command  = shell;
-        e.location = std::wstring(kWinlogonPath) + L"\\Shell";
-        e.type     = StartupType::WinlogonShell;
-        results.push_back(std::move(e));
-    }
-
-    // Userinit
-    std::wstring userinit = ReadRegValue(HKEY_LOCAL_MACHINE, kWinlogonPath, L"Userinit");
-    if (!userinit.empty()) {
-        // 通常为 C:\WINDOWS\system32\userinit.exe, 如果有多个用逗号分隔
+    auto scanPkg = [&](const wchar_t* val, StartupType t) {
+        std::wstring data = ReadRegStr(HKEY_LOCAL_MACHINE, kLSA, val);
         size_t pos = 0;
-        while (pos < userinit.size()) {
-            auto cp = userinit.find(L',', pos);
-            std::wstring part = (cp == std::wstring::npos) ? userinit.substr(pos) : userinit.substr(pos, cp - pos);
-            // 修剪空格
-            while (!part.empty() && part[0] == L' ') part.erase(0, 1);
-            while (!part.empty() && part.back() == L' ') part.pop_back();
-            if (!part.empty() && part != L"C:\\Windows\\system32\\userinit.exe" &&
-                part != L"C:\\WINDOWS\\system32\\userinit.exe") {
+        while (pos < data.size()) {
+            auto nl = data.find(L'\n', pos);
+            std::wstring line = (nl == std::wstring::npos) ? data.substr(pos) : data.substr(pos, nl - pos);
+            while (!line.empty() && (line.back() == L'\r' || line.back() == L'\n')) line.pop_back();
+            if (!line.empty()) {
                 StartupEntry e;
-                e.name     = L"Userinit";
-                e.command  = part;
-                e.location = std::wstring(kWinlogonPath) + L"\\Userinit";
-                e.type     = StartupType::WinlogonUserinit;
-                results.push_back(std::move(e));
+                e.name = line;
+                e.command = line;
+                e.location = std::wstring(kLSA) + L"\\" + val;
+                e.type = t;
+                r.push_back(std::move(e));
             }
-            if (cp == std::wstring::npos) break;
-            pos = cp + 1;
+            if (nl == std::wstring::npos) break;
+            pos = nl + 1;
+        }
+    };
+
+    scanPkg(L"Authentication Packages", StartupType::LSAAuthPackage);
+    scanPkg(L"Notification Packages",   StartupType::LSANotifyPackage);
+    scanPkg(L"Security Packages",       StartupType::LSASecurityPackage);
+}
+
+// ===========================================================================
+// 12. Image Hijacks
+// ===========================================================================
+
+void StartupManager::ScanImageHijacks(std::vector<StartupEntry>& r) {
+    EnumRegSubKeysData(HKEY_LOCAL_MACHINE,
+        L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Image File Execution Options",
+        StartupType::ImageFileExecOptions, L"Debugger", r, KEY_WOW64_64KEY);
+    EnumRegSubKeysData(HKEY_LOCAL_MACHINE,
+        L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Image File Execution Options",
+        StartupType::ImageFileExecOptions, L"Debugger", r, KEY_WOW64_32KEY);
+}
+
+// ===========================================================================
+// 13. Print Monitors
+// ===========================================================================
+
+void StartupManager::ScanPrintMonitors(std::vector<StartupEntry>& r) {
+    EnumRegSubKeysData(HKEY_LOCAL_MACHINE,
+        L"SYSTEM\\CurrentControlSet\\Control\\Print\\Monitors",
+        StartupType::PrintMonitor, L"Driver", r);
+}
+
+// ===========================================================================
+// 14. Network Providers + Order
+// ===========================================================================
+
+void StartupManager::ScanNetwork(std::vector<StartupEntry>& r) {
+    EnumRegSubKeysData(HKEY_LOCAL_MACHINE,
+        L"SYSTEM\\CurrentControlSet\\Control\\NetworkProvider\\Order",
+        StartupType::NetworkProvider, L"ProviderPath", r);
+}
+
+// ===========================================================================
+// 15. Active Setup
+// ===========================================================================
+
+void StartupManager::ScanActiveSetup(std::vector<StartupEntry>& r) {
+    for (auto sam : {KEY_WOW64_64KEY, KEY_WOW64_32KEY}) {
+        HKEY hKey;
+        if (RegOpenKeyExW(HKEY_LOCAL_MACHINE,
+                L"SOFTWARE\\Microsoft\\Active Setup\\Installed Components",
+                0, KEY_READ | sam, &hKey) == ERROR_SUCCESS) {
+            wchar_t kn[1024]; DWORD knLen; DWORD idx = 0;
+            while (true) {
+                knLen = 1024;
+                if (RegEnumKeyExW(hKey, idx, kn, &knLen, nullptr, nullptr, nullptr, nullptr) != ERROR_SUCCESS) break;
+                HKEY hSub;
+                if (RegOpenKeyExW(hKey, kn, 0, KEY_READ, &hSub) == ERROR_SUCCESS) {
+                    std::wstring stub = ReadRegStr(hSub, L"StubPath");
+                    if (!stub.empty()) {
+                        StartupEntry e;
+                        e.name = ReadRegStr(hSub, L"");
+                        if (e.name.empty()) e.name = kn;
+                        e.command = stub;
+                        e.location = L"Active Setup\\Installed Components\\" + std::wstring(kn);
+                        e.type = StartupType::ActiveSetup;
+                        r.push_back(std::move(e));
+                    }
+                    RegCloseKey(hSub);
+                }
+                idx++;
+            }
+            RegCloseKey(hKey);
         }
     }
 }
 
 // ===========================================================================
-// BHO (Browser Helper Objects)
+// 16. Terminal Server Install
 // ===========================================================================
 
-void StartupManager::ScanBHO(std::vector<StartupEntry>& results)
-{
-    EnumRegSubKeys(HKEY_LOCAL_MACHINE,
-        L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Browser Helper Objects",
-        StartupType::BrowserHelperObject, L"", results, true);
-    EnumRegSubKeys(HKEY_LOCAL_MACHINE,
-        L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Browser Helper Objects",
-        StartupType::BrowserHelperObject, L"", results, false);
-}
-
-// ===========================================================================
-// Shell Service Objects
-// ===========================================================================
-
-void StartupManager::ScanShellServiceObjects(std::vector<StartupEntry>& results)
-{
-    EnumRegSubKeys(HKEY_LOCAL_MACHINE,
-        L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\ShellServiceObjectDelayLoad",
-        StartupType::ShellServiceObject, L"", results, true);
-    EnumRegSubKeys(HKEY_LOCAL_MACHINE,
-        L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\ShellServiceObjectDelayLoad",
-        StartupType::ShellServiceObject, L"", results, false);
-}
-
-// ===========================================================================
-// 映像劫持 (Image Hijack / Debugger)
-// ===========================================================================
-
-void StartupManager::ScanImageHijacks(std::vector<StartupEntry>& results)
-{
-    HKEY hKey = nullptr;
-    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE,
-            L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Image File Execution Options",
-            0, KEY_READ, &hKey) != ERROR_SUCCESS) return;
-
-    wchar_t keyName[1024];
-    DWORD knLen = 1024;
-    DWORD index = 0;
-    FILETIME ft;
-
-    while (RegEnumKeyExW(hKey, index, keyName, &knLen, nullptr, nullptr, nullptr, &ft) == ERROR_SUCCESS) {
-        HKEY hSub = nullptr;
-        if (RegOpenKeyExW(hKey, keyName, 0, KEY_READ, &hSub) == ERROR_SUCCESS) {
-            std::wstring debugger = ReadRegValue(hSub, L"Debugger");
-            if (!debugger.empty()) {
-                StartupEntry e;
-                e.name     = keyName;
-                e.command  = debugger;
-                e.location = L"HKLM\\...\\Image File Execution Options\\" + std::wstring(keyName) + L"\\Debugger";
-                e.type     = StartupType::ImageFileExecOptions;
-                results.push_back(std::move(e));
+void StartupManager::ScanTerminalServer(std::vector<StartupEntry>& r) {
+    for (auto sam : {KEY_WOW64_64KEY, KEY_WOW64_32KEY}) {
+        HKEY hKey;
+        if (RegOpenKeyExW(HKEY_LOCAL_MACHINE,
+                L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Terminal Server\\Install\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+                0, KEY_READ | sam, &hKey) == ERROR_SUCCESS) {
+            wchar_t vn[1024]; DWORD vnLen; BYTE data[4096]; DWORD dataLen, vt; DWORD idx = 0;
+            while (true) {
+                vnLen = 1024; dataLen = sizeof(data);
+                if (RegEnumValueW(hKey, idx, vn, &vnLen, nullptr, &vt, data, &dataLen) != ERROR_SUCCESS) break;
+                if (vt == REG_SZ || vt == REG_EXPAND_SZ) {
+                    StartupEntry e;
+                    e.name = vn;
+                    e.command = (wchar_t*)data;
+                    e.location = L"TS Install\\Run\\" + std::wstring(vn);
+                    e.type = StartupType::TerminalServerInstall;
+                    r.push_back(std::move(e));
+                }
+                idx++;
             }
-            RegCloseKey(hSub);
+            RegCloseKey(hKey);
         }
-        knLen = 1024;
-        ++index;
     }
-    RegCloseKey(hKey);
 }
 
 // ===========================================================================
-// 计划任务（简化版: 通过 schtasks 命令行）
+// 17. Winsock LSP
 // ===========================================================================
 
-void StartupManager::ScanScheduledTasks(std::vector<StartupEntry>& results)
-{
-    // 可以使用 COM 接口 ITaskScheduler，但为了简化，使用 schtasks 命令行
-    // 这里先留空，后续通过 COM ITaskScheduler 实现会更完整
-    // 或者使用 schtasks.exe /query /v /fo csv 解析输出
-    // 简化处理：通过注册表读取计划任务文件夹
-    HKEY hKey = nullptr;
-    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE,
-            L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Schedule\\TaskCache\\Tasks",
-            0, KEY_READ, &hKey) != ERROR_SUCCESS) return;
-
-    wchar_t keyName[1024];
-    DWORD knLen = 1024;
-    DWORD index = 0;
-    FILETIME ft;
-
-    while (RegEnumKeyExW(hKey, index, keyName, &knLen, nullptr, nullptr, nullptr, &ft) == ERROR_SUCCESS) {
-        HKEY hSub = nullptr;
-        if (RegOpenKeyExW(hKey, keyName, 0, KEY_READ, &hSub) == ERROR_SUCCESS) {
-            std::wstring path = ReadRegValue(hSub, L"Path");
-            if (!path.empty()) {
-                StartupEntry e;
-                e.name     = path;
-                e.command  = ReadRegValue(hSub, L"Actions");
-                e.location = L"Task Scheduler: " + path;
-                e.type     = StartupType::ScheduledTask;
-                if (e.command.empty()) e.command = path;
-                results.push_back(std::move(e));
-            }
-            RegCloseKey(hSub);
-        }
-        knLen = 1024;
-        ++index;
+void StartupManager::ScanWinsock(std::vector<StartupEntry>& r) {
+    // Winsock LSP catalog is complex — simplified: check registry
+    const wchar_t* kLSP = L"SYSTEM\\CurrentControlSet\\Services\\WinSock2\\Parameters\\Protocol_Catalog9\\Catalog_Entries";
+    for (auto sam : {KEY_WOW64_64KEY, KEY_WOW64_32KEY}) {
+        EnumRegSubKeysData(HKEY_LOCAL_MACHINE, kLSP,
+                           StartupType::WinsockLSP, L"PackedCatalogItem", r, sam);
     }
-    RegCloseKey(hKey);
 }
 
 // ===========================================================================
-// EnumAll: 枚举所有启动项
+// EnumAll / EnumByType
 // ===========================================================================
 
-std::vector<StartupEntry> StartupManager::EnumAll()
-{
+std::vector<StartupEntry> StartupManager::EnumAll() {
     std::vector<StartupEntry> results;
-
-    ScanRegistryRun(results);
-    ScanRegistryRunOnce(results);
-    ScanStartupFolders(results);
-    ScanShellExecuteHooks(results);
-    ScanAppInitDLLs(results);
-    ScanBootExecute(results);
-    ScanServices(results);
-    ScanScheduledTasks(results);
+    ScanLogon(results);
+    ScanExplorer(results);
     ScanWinlogon(results);
     ScanBHO(results);
-    ScanShellServiceObjects(results);
+    ScanServices(results);
+    ScanDrivers(results);
+    ScanScheduledTasks(results);
+    ScanBootExecute(results);
+    ScanAppInit(results);
+    ScanKnownDLLs(results);
+    ScanLSA(results);
     ScanImageHijacks(results);
-
+    ScanPrintMonitors(results);
+    ScanNetwork(results);
+    ScanActiveSetup(results);
+    ScanTerminalServer(results);
+    ScanWinsock(results);
     return results;
 }
 
-// ===========================================================================
-// 禁用 / 启用 / 删除
-// ===========================================================================
-
-bool StartupManager::Disable(const StartupEntry& entry)
-{
-    // 对于注册表项，在值名前加 "-" 或者重命名
-    // 对于启动文件夹，添加 .disabled 后缀
-    // 简化：对启动文件夹在文件名后加 .disabled
-    if (entry.type == StartupType::StartupFolder) {
-        std::wstring newPath = entry.command + L".disabled";
-        return MoveFileW(entry.command.c_str(), newPath.c_str()) != FALSE;
-    }
-    return false;
-}
-
-bool StartupManager::Enable(StartupEntry& entry)
-{
-    if (entry.type == StartupType::StartupFolder) {
-        std::wstring newPath = entry.command;
-        if (newPath.size() > 9 && newPath.substr(newPath.size() - 9) == L".disabled") {
-            std::wstring origPath = newPath.substr(0, newPath.size() - 9);
-            if (MoveFileW(newPath.c_str(), origPath.c_str())) {
-                entry.command = origPath;
-                return true;
+std::vector<StartupEntry> StartupManager::EnumByType(const StartupType* types, int count) {
+    auto all = EnumAll();
+    if (!types || count <= 0) return all;
+    std::vector<StartupEntry> filtered;
+    for (auto& e : all) {
+        for (int i = 0; i < count; i++) {
+            if (e.type == types[i]) {
+                filtered.push_back(std::move(e));
+                break;
             }
         }
     }
-    return false;
+    return filtered;
 }
 
-bool StartupManager::Remove(const StartupEntry& entry)
-{
-    if (entry.type == StartupType::RegistryRun ||
-        entry.type == StartupType::RegistryRunOnce) {
-        // 从注册表删除值
-        // 解析 location 格式: key\valueName
-        HKEY root = HKEY_LOCAL_MACHINE;
-        std::wstring subKey;
-        // 简化：直接删除
-        return false;
+// ===========================================================================
+// Disable / Enable / Remove (simplified)
+// ===========================================================================
+
+bool StartupManager::Disable(const StartupEntry& e) {
+    if (e.type == StartupType::StartupFolder) {
+        return MoveFileW(e.command.c_str(), (e.command + L".disabled").c_str()) != FALSE;
     }
-    if (entry.type == StartupType::StartupFolder) {
-        return DeleteFileW(entry.command.c_str()) != FALSE;
+    // TODO: rename registry value with "-" prefix
+    return false;
+}
+bool StartupManager::Enable(StartupEntry& e) {
+    if (e.type == StartupType::StartupFolder && e.command.size() > 9 &&
+        e.command.substr(e.command.size() - 9) == L".disabled") {
+        std::wstring orig = e.command.substr(0, e.command.size() - 9);
+        if (MoveFileW(e.command.c_str(), orig.c_str())) { e.command = orig; return true; }
     }
     return false;
 }
-
-void StartupManager::JumpToRegistry(const std::wstring& regPath)
-{
-    // 调用 regedit 跳转到指定路径
-    // 格式: regedit /s 或者直接打开
+bool StartupManager::Remove(const StartupEntry& e) {
+    if (e.type == StartupType::StartupFolder)
+        return DeleteFileW(e.command.c_str()) != FALSE;
+    return false;
+}
+void StartupManager::JumpToRegistry(const std::wstring&) {
     ShellExecuteW(nullptr, L"open", L"regedit.exe", nullptr, nullptr, SW_SHOWNORMAL);
 }

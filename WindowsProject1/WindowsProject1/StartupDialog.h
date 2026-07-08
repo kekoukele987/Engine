@@ -11,6 +11,7 @@ struct StartupDialogTexts {
     const wchar_t* colType;
     const wchar_t* colCommand;
     const wchar_t* colLocation;
+    const wchar_t* colPublisher;
     const wchar_t* btnRefresh;
     const wchar_t* btnJump;
     const wchar_t* btnClose;
