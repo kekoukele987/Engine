@@ -58,7 +58,8 @@ std::vector<ObjEntry> ObjectManager::EnumDirectory(const std::wstring& path)
 
     while (true) {
         ULONG retLen = 0;
-        NTSTATUS st = g_NtQueryDirObj(hDir, buf, sizeof(buf), FALSE, first ? TRUE : FALSE, &context, &retLen);
+        NTSTATUS st = g_NtQueryDirObj(hDir, buf, sizeof(buf), FALSE,
+                                       first ? TRUE : FALSE, &context, &retLen);
         first = false;
         if (st != 0) break;
 
@@ -74,22 +75,10 @@ std::vector<ObjEntry> ObjectManager::EnumDirectory(const std::wstring& path)
             e.name = objName;
             e.typeName = typeName;
             e.isDirectory = (typeName == L"Directory");
+            e.hasChildren = e.isDirectory;  // 懒加载：目录标记为可能有子项，但不实际验证（避免递归开目录的巨大开销）
             e.fullPath = path;
             if (!e.fullPath.empty() && e.fullPath.back() != L'\\') e.fullPath += L"\\";
             e.fullPath += objName;
-
-            // 查看子目录是否有子对象
-            if (e.isDirectory) {
-                HANDLE hSub = OpenDirectory(e.fullPath);
-                if (hSub) {
-                    BYTE test[64];
-                    ULONG subCtx = 0;
-                    ULONG rl = 0;
-                    NTSTATUS st2 = g_NtQueryDirObj(hSub, test, sizeof(test), TRUE, TRUE, &subCtx, &rl);
-                    e.hasChildren = (st2 == 0);
-                    CloseHandle(hSub);
-                }
-            }
 
             results.push_back(e);
             ptr += sizeof(OBJECT_DIRECTORY_INFORMATION);
